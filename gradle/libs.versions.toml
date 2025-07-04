@@ -1,25 +1,25 @@
 [versions]
 agp = "8.11.0"
-kotlin = "2.0.21"
+kotlin = "2.2.0"
 coreKtx = "1.16.0"
 junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 lifecycleRuntimeKtx = "2.9.1"
 activityCompose = "1.10.1"
-composeBom = "2024.09.00"
+composeBom = "2025.06.01"
 jetbrainsKotlinJvm = "2.0.21"
-appcompat = "1.6.1"
-material = "1.10.0"
-hilt = "2.51.1"
+appcompat = "1.7.1"
+material = "1.12.0"
+hilt = "2.56.2"
 androidx-hilt-navigation-compose = "1.2.0"
 tensorflow-lite-task-vision = "0.4.4"
 javax-inject = "1"
-hilt-plugin = "2.51.1"
-mediapipeTasksText = "0.10.21"
+hilt-plugin = "2.56.2"
+mediapipeTasksText = "0.20230731"
 mediapipeTasksGenai = "0.10.25"
 mediapipeTasksImageGenerator = "0.10.21"
-mediapipe = "0.10.14"
+kotlinx-coroutines = "1.10.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -46,7 +46,7 @@ javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "j
 mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasksText" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
 mediapipe-tasks-imagegen = { group = "com.google.mediapipe", name = "tasks-vision-image-generator", version.ref = "mediapipeTasksImageGenerator" }
-mediapipe-tasks-llminference = { group = "com.google.mediapipe", name = "tasks-llm-inference", version.ref = "mediapipe" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
