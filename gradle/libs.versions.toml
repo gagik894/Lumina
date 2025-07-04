@@ -13,16 +13,18 @@ appcompat = "1.7.1"
 material = "1.12.0"
 hilt = "2.56.2"
 androidx-hilt-navigation-compose = "1.2.0"
+tasksVision = "0.10.8"
 tensorflow-lite-task-vision = "0.4.4"
 javax-inject = "1"
 hilt-plugin = "2.56.2"
 mediapipeTasksText = "0.20230731"
 mediapipeTasksGenai = "0.10.25"
-mediapipeTasksImageGenerator = "0.10.21"
+mediapipeTasksImageGenerator = "0.20230731"
 kotlinx-coroutines = "1.10.2"
 camerax = "1.4.2"
 accompanist = "0.37.3"
 guava = "33.4.8-android"
+mediapipe = "0.20230731"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -44,11 +46,12 @@ material = { group = "com.google.android.material", name = "material", version.r
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "androidx-hilt-navigation-compose" }
+tasks-vision-v0108 = { module = "com.google.mediapipe:tasks-vision", version.ref = "tasksVision" }
 tensorflow-lite-task-vision = { group = "org.tensorflow", name = "tensorflow-lite-task-vision", version.ref = "tensorflow-lite-task-vision" }
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javax-inject" }
 mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasksText" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
-mediapipe-tasks-imagegen = { group = "com.google.mediapipe", name = "tasks-vision-image-generator", version.ref = "mediapipeTasksImageGenerator" }
+mediapipe-tasks-vision = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipeTasksImageGenerator" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 camerax-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
 camerax-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
@@ -56,7 +59,6 @@ camerax-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", vers
 camerax-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanist" }
 guava = { group = "com.google.guava", name = "guava", version.ref = "guava" }
-
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

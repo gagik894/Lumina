@@ -20,8 +20,8 @@ fun SceneExplorerScreen(
 ) {
     HandleCameraPermission(
         onPermissionGranted = {
-            CameraScreen(onImageCaptured = { bitmap ->
-                viewModel.onTakePhoto(bitmap)
+            CameraScreen(onFrame = { bitmap ->
+                viewModel.onFrameReceived(bitmap)
             })
 
             // TODO: We need to overlay the description text and loading indicator

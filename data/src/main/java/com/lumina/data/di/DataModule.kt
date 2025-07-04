@@ -2,6 +2,8 @@ package com.lumina.data.di
 
 import com.lumina.data.datasource.AiDataSource
 import com.lumina.data.datasource.GemmaAiDataSource
+import com.lumina.data.datasource.MediaPipeObjectDetector
+import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.data.repository.LuminaRepositoryImpl
 import com.lumina.domain.repository.LuminaRepository
 import dagger.Binds
@@ -33,4 +35,14 @@ abstract class DataModule {
     abstract fun bindAiDataSource(
         gemmaAiDataSource: GemmaAiDataSource
     ): AiDataSource
+
+    /**
+     * Binds the ObjectDetectorDataSource interface to its MediaPipe implementation.
+     * @Singleton ensures a single instance of our object detector.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindObjectDetectorDataSource(
+        mediaPipeObjectDetector: MediaPipeObjectDetector
+    ): ObjectDetectorDataSource
 }
