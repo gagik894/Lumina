@@ -16,6 +16,10 @@ androidx-hilt-navigation-compose = "1.2.0"
 tensorflow-lite-task-vision = "0.4.4"
 javax-inject = "1"
 hilt-plugin = "2.51.1"
+mediapipeTasksText = "0.10.21"
+mediapipeTasksGenai = "0.10.25"
+mediapipeTasksImageGenerator = "0.10.21"
+mediapipe = "0.10.14"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +43,10 @@ hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", v
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "androidx-hilt-navigation-compose" }
 tensorflow-lite-task-vision = { group = "org.tensorflow", name = "tensorflow-lite-task-vision", version.ref = "tensorflow-lite-task-vision" }
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javax-inject" }
+mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasksText" }
+mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
+mediapipe-tasks-imagegen = { group = "com.google.mediapipe", name = "tasks-vision-image-generator", version.ref = "mediapipeTasksImageGenerator" }
+mediapipe-tasks-llminference = { group = "com.google.mediapipe", name = "tasks-llm-inference", version.ref = "mediapipe" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

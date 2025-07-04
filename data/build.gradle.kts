@@ -39,6 +39,8 @@ dependencies {
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
     implementation(libs.tensorflow.lite.task.vision)
+    implementation(libs.mediapipe.tasks.imagegen)
+    implementation(libs.mediapipe.tasks.llminference)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
