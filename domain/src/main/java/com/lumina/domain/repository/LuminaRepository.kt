@@ -2,26 +2,53 @@ package com.lumina.domain.repository
 
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
-import com.lumina.domain.model.SceneDescription
+import com.lumina.domain.model.NavigationCue
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * LuminaRepository defines the contract for interacting with the AI model to describe scenes.
- * It provides a method to describe a scene based on an image input and a prompt.
+ * Repository interface for Lumina's AI-powered navigation assistance system.
+ *
+ * Provides intelligent navigation cues for visually impaired users through
+ * a sophisticated decision tree that analyzes camera frames and triggers
+ * appropriate AI responses based on threat level and environmental changes.
  */
 interface LuminaRepository {
+
+    /** Current initialization state of the AI model */
     val initializationState: StateFlow<InitializationState>
-    fun getProactiveNavigationCues(): Flow<SceneDescription>
+
+    /**
+     * Provides intelligent navigation cues based on object detection and AI analysis.
+     *
+     * Uses a sophisticated decision tree with four rules:
+     * 1. Critical threats (immediate obstacles)
+     * 2. Important new objects appearing
+     * 3. Periodic ambient updates
+     * 4. Stable state (power saving mode)
+     *
+     * @return Flow of navigation cues with appropriate urgency levels
+     */
+    fun getNavigationCues(): Flow<NavigationCue>
+
+    /**
+     * Processes a new camera frame for object detection and potential AI analysis.
+     *
+     * @param image Camera frame to be analyzed
+     */
     suspend fun processNewFrame(image: ImageInput)
-    fun stopProactiveNavigation()
+
+    /**
+     * Stops the proactive navigation pipeline and releases resources.
+     */
+    fun stopNavigation()
+
     /**
      * Describes a scene based on the provided image and prompt.
-     * This method returns a flow of SceneDescription, allowing for streaming responses.
      *
-     * @param image The image input to be processed.
-     * @param prompt The prompt to guide the description generation.
-     * @return A flow of SceneDescription containing partial responses and completion status.
+     * @param image The image input to be processed
+     * @param prompt The prompt to guide the description generation
+     * @return A flow of navigation cues containing the scene description
      */
-    fun describeScene(image: ImageInput, prompt: String): Flow<SceneDescription>
+    fun describeScene(image: ImageInput, prompt: String): Flow<NavigationCue>
 }

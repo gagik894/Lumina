@@ -6,7 +6,7 @@ import com.lumina.data.datasource.AiDataSource
 import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
-import com.lumina.domain.model.SceneDescription
+import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.repository.LuminaRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,10 +21,13 @@ import javax.inject.Singleton
 
 /**
  * Implementation of [LuminaRepository] that coordinates between AI data sources and object detection
- * to provide proactive navigation assistance for visually impaired users.
+ * to provide intelligent navigation assistance for visually impaired users.
  *
- * This repository implements a "Director Pattern" that intelligently decides when to trigger
- * AI descriptions based on object detection changes, optimizing for performance and user experience.
+ * This repository implements an intelligent "Director Pattern" with a sophisticated decision tree:
+ * - Rule 1: Critical threats (immediate obstacles)
+ * - Rule 2: Important new objects appearing
+ * - Rule 3: Periodic ambient updates
+ * - Rule 4: Stable state (power saving mode)
  *
  * @param gemmaDataSource The AI data source responsible for generating scene descriptions
  * @param objectDetectorDataSource The data source for detecting objects in camera frames
@@ -40,7 +43,7 @@ class LuminaRepositoryImpl @Inject constructor(
     override val initializationState: StateFlow<InitializationState> =
         gemmaDataSource.initializationState
 
-    /** Job managing the proactive navigation pipeline */
+    /** Job managing the navigation pipeline */
     private var navigationJob: Job? = null
 
     /**
@@ -52,15 +55,29 @@ class LuminaRepositoryImpl @Inject constructor(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    /** Flow emitting scene descriptions to the UI layer */
-    private val descriptionFlow = MutableSharedFlow<SceneDescription>()
+    /** Flow emitting navigation cues to the UI layer */
+    private val navigationCueFlow = MutableSharedFlow<NavigationCue>()
 
-    override fun getProactiveNavigationCues(): Flow<SceneDescription> {
-        // Start the pipeline if it's not already running
+    /** Critical threat objects that require immediate attention */
+    private val criticalObjects = setOf("car", "truck", "bus", "bicycle", "motorcycle", "train")
+
+    /** Important objects that warrant informational alerts when new */
+    private val importantObjects =
+        setOf("person", "car", "dog", "cat", "bicycle", "motorcycle", "truck", "bus")
+
+    /** Timestamps for preventing alert spam */
+    private var lastCriticalAlertTime = 0L
+    private var lastInformationalAlertTime = 0L
+    private var lastAmbientUpdateTime = 0L
+
+    /** Object tracking for change detection */
+    private var lastSeenObjects = emptySet<String>()
+
+    override fun getNavigationCues(): Flow<NavigationCue> {
         if (navigationJob == null || navigationJob?.isActive == false) {
             startDirectorPipeline()
         }
-        return descriptionFlow
+        return navigationCueFlow
     }
 
     override suspend fun processNewFrame(image: ImageInput) {
@@ -69,7 +86,7 @@ class LuminaRepositoryImpl @Inject constructor(
         frameFlow.tryEmit(Pair(bitmap, System.currentTimeMillis()))
     }
 
-    override fun stopProactiveNavigation() {
+    override fun stopNavigation() {
         navigationJob?.cancel()
         objectDetectorDataSource.close()
         gemmaDataSource.resetSession()
@@ -78,57 +95,147 @@ class LuminaRepositoryImpl @Inject constructor(
     override fun describeScene(
         image: ImageInput,
         prompt: String
-    ): Flow<SceneDescription> {
+    ): Flow<NavigationCue> {
         TODO("Manual scene description not yet implemented")
     }
 
     /**
-     * Starts the Director Pipeline that coordinates object detection and AI descriptions.
+     * Starts the Director Pipeline with intelligent decision tree for navigation cues.
      *
-     * The pipeline:
-     * 1. Continuously tracks the latest camera frame
-     * 2. Monitors object detection changes
-     * 3. Intelligently triggers AI descriptions when significant changes occur
-     * 4. Implements a 5-second cooldown to prevent spam
+     * Implements a 4-rule decision system:
+     * 1. Critical threats (immediate obstacles)
+     * 2. Important new objects
+     * 3. Periodic ambient updates
+     * 4. Stable state (power saving)
      */
     private fun startDirectorPipeline() {
         navigationJob = repositoryScope.launch {
-            var lastSeenObjects = emptySet<String>()
-            var lastBrainTriggerTime = 0L
             var currentFrame: Bitmap? = null
 
-            // Launch a collector to keep track of the latest frame
             launch {
                 frameFlow.collect { (bitmap, _) ->
                     currentFrame = bitmap
                 }
             }
 
-            // Get the stream of detected objects from our Scout.
             objectDetectorDataSource.getDetectionStream(frameFlow)
-                .collect { currentObjects ->
-                    val currentObjectSet = currentObjects.toSet()
+                .collect { detectedObjects ->
                     val currentTime = System.currentTimeMillis()
+                    val currentObjectLabels = detectedObjects.toSet()
 
-                    val newObjects = currentObjectSet - lastSeenObjects
-                    val isSignificantChange = newObjects.isNotEmpty()
-                    val isCooldownOver =
-                        (currentTime - lastBrainTriggerTime) > 5000 // 5 sec cooldown
+                    // Rule 1: Check for CRITICAL threats
+                    if (checkCriticalThreats(detectedObjects, currentTime)) {
+                        currentFrame?.let { frame ->
+                            triggerCriticalAlert(frame)
+                        }
+                        lastSeenObjects = currentObjectLabels
+                        return@collect
+                    }
 
-                    if (isSignificantChange && isCooldownOver) {
-                        lastBrainTriggerTime = currentTime
+                    // Rule 2: Check for IMPORTANT new objects
+                    val newImportantObjects = findNewImportantObjects(currentObjectLabels)
+                    if (newImportantObjects.isNotEmpty() &&
+                        (currentTime - lastInformationalAlertTime) > 5000
+                    ) {
 
                         currentFrame?.let { frame ->
-                            //TODO: Use a more descriptive, context-aware prompts based on detected objects
-                            val prompt = "fast describe image, just most important for a blind"
-                            gemmaDataSource.generateResponse(prompt, frame)
-                                .collect { (partialResponse, isDone) ->
-                                    descriptionFlow.emit(SceneDescription(partialResponse, isDone))
-                                }
+                            triggerInformationalAlert(frame, newImportantObjects)
                         }
+                        lastInformationalAlertTime = currentTime
+                        lastSeenObjects = currentObjectLabels
+                        return@collect
                     }
-                    lastSeenObjects = currentObjectSet
+
+                    // Rule 3: Check for AMBIENT update timing
+                    if ((currentTime - lastAmbientUpdateTime) > 30000) { // 30 seconds
+                        currentFrame?.let { frame ->
+                            triggerAmbientUpdate(frame)
+                        }
+                        lastAmbientUpdateTime = currentTime
+                        lastSeenObjects = currentObjectLabels
+                        return@collect
+                    }
+
+                    // Rule 4: STABLE state - do nothing, just update tracking
+                    lastSeenObjects = currentObjectLabels
                 }
         }
+    }
+
+    /**
+     * Rule 1: Checks for critical threats requiring immediate attention.
+     *
+     * @param detectedObjects Current frame's detected objects with bounding boxes
+     * @param currentTime Current timestamp
+     * @return true if critical threat detected
+     */
+    private fun checkCriticalThreats(detectedObjects: List<String>, currentTime: Long): Boolean {
+        // For now, using simplified logic until we get bounding box data from ObjectDetectorDataSource
+        val criticalObjectsPresent = detectedObjects.filter { it in criticalObjects }
+
+        if (criticalObjectsPresent.isNotEmpty() &&
+            (currentTime - lastCriticalAlertTime) > 3000
+        ) { // 3 second cooldown for critical
+            lastCriticalAlertTime = currentTime
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     * Rule 2: Finds new important objects that warrant informational alerts.
+     *
+     * @param currentObjects Set of currently detected object labels
+     * @return List of new important objects
+     */
+    private fun findNewImportantObjects(currentObjects: Set<String>): List<String> {
+        val newObjects = currentObjects - lastSeenObjects
+        return newObjects.filter { it in importantObjects }
+    }
+
+    /**
+     * Triggers a critical alert for immediate threats.
+     */
+    private suspend fun triggerCriticalAlert(frame: Bitmap) {
+        val prompt = "IMMEDIATE OBSTACLE. NAME IT IN 3 WORDS."
+
+        gemmaDataSource.generateResponse(prompt, frame)
+            .collect { (partialResponse, isDone) ->
+                val criticalAlert = NavigationCue.CriticalAlert(partialResponse, isDone)
+                navigationCueFlow.emit(criticalAlert)
+            }
+    }
+
+    /**
+     * Triggers an informational alert for new important objects.
+     */
+    private suspend fun triggerInformationalAlert(frame: Bitmap, newObjects: List<String>) {
+        val objectContext = if (newObjects.isNotEmpty()) {
+            " A new ${newObjects.first()} has appeared."
+        } else {
+            ""
+        }
+
+        val prompt = "fast describe image, just most important for a blind.$objectContext"
+
+        gemmaDataSource.generateResponse(prompt, frame)
+            .collect { (partialResponse, isDone) ->
+                val informationalAlert = NavigationCue.InformationalAlert(partialResponse, isDone)
+                navigationCueFlow.emit(informationalAlert)
+            }
+    }
+
+    /**
+     * Triggers an ambient update for general environmental context.
+     */
+    private suspend fun triggerAmbientUpdate(frame: Bitmap) {
+        val prompt = "Briefly describe the general surroundings for a blind user."
+
+        gemmaDataSource.generateResponse(prompt, frame)
+            .collect { (partialResponse, isDone) ->
+                val ambientUpdate = NavigationCue.AmbientUpdate(partialResponse, isDone)
+                navigationCueFlow.emit(ambientUpdate)
+            }
     }
 }
