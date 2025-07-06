@@ -40,7 +40,7 @@ class SceneExplorerViewModel @Inject constructor(
     val uiState = _uiState.asStateFlow()
 
     private var lastFrameTime = 0L
-    private val frameChannel = Channel<Pair<Bitmap, Long>>(Channel.UNLIMITED)
+    private val frameChannel = Channel<Pair<Bitmap, Long>>(capacity = 10) // Bounded channel with capacity 10
     private val frameFlow = frameChannel.receiveAsFlow()
 
     init {
