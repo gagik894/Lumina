@@ -17,9 +17,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.common.util.concurrent.ListenableFuture
 import java.util.concurrent.Executor
 import kotlin.coroutines.resume
@@ -28,11 +28,22 @@ import kotlin.coroutines.suspendCoroutine
 
 private const val TAG = "CameraScreen"
 
+/**
+ * Camera screen composable that provides real-time camera feed and frame analysis.
+ *
+ * This component sets up CameraX for continuous camera preview and image analysis.
+ * Each frame is automatically processed and passed to the provided callback for
+ * AI analysis. The implementation uses:
+ * - Back camera as the default camera source
+ * - KEEP_ONLY_LATEST backpressure strategy for optimal performance
+ * - Main executor for UI thread safety
+ *
+ * @param onFrame Callback invoked for each camera frame, receiving a Bitmap for analysis
+ */
 @RequiresApi(Build.VERSION_CODES.P)
 @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 @Composable
 fun CameraScreen(
-    // The callback now provides a continuous stream of images for analysis
     onFrame: (Bitmap) -> Unit
 ) {
     val context = LocalContext.current
@@ -72,14 +83,18 @@ fun CameraScreen(
         }
     }
 
-    // The UI is now simpler: just the camera view, no button.
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView({ previewView }, modifier = Modifier.fillMaxSize())
     }
 }
 
-
-// Helper suspend function to get the CameraProvider
+/**
+ * Extension function to await the result of a ListenableFuture in a coroutine.
+ *
+ * @param context Android context for accessing the main executor
+ * @return The result of the future operation
+ * @throws Exception if the future operation fails
+ */
 @RequiresApi(Build.VERSION_CODES.P)
 private suspend fun <T> ListenableFuture<T>.await(context: Context): T {
     return suspendCoroutine { continuation ->
@@ -93,6 +108,8 @@ private suspend fun <T> ListenableFuture<T>.await(context: Context): T {
     }
 }
 
-// An extension property to get the main executor easily.
+/**
+ * Extension property to get the main executor for the given context.
+ */
 private val Context.mainExecutor: Executor
     get() = ContextCompat.getMainExecutor(this)

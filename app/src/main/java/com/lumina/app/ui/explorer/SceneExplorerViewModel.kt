@@ -1,121 +1,97 @@
 package com.lumina.app.ui.explorer
 
 import android.graphics.Bitmap
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.domain.model.ImageInput
-import com.lumina.domain.usecase.DescribeSceneUseCase
+import com.lumina.domain.model.InitializationState
+import com.lumina.domain.repository.LuminaRepository
+import com.lumina.domain.usecase.GetInitializationStateUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 
 /**
- * Defines the immutable state for the SceneExplorerScreen.
+ * Data class representing the UI state for the Scene Explorer screen.
+ *
+ * @property description Current scene description text being displayed to the user
+ * @property initializationState Current state of the AI model initialization
  */
 data class SceneExplorerUiState(
-    val isLoading: Boolean = false,
-    val description: String = "Point your camera and take a photo to explore the scene.",
-    val detectedObjects: List<String> = emptyList()
+    val description: String = "",
+    val initializationState: InitializationState = InitializationState.NotInitialized
 )
 
+/**
+ * ViewModel for the Scene Explorer feature that manages camera frames and AI-generated descriptions.
+ *
+ * This ViewModel coordinates between the camera input and the AI processing pipeline,
+ * providing real-time scene descriptions for visually impaired users. It handles:
+ * - Processing camera frames from the UI
+ * - Monitoring AI model initialization state
+ * - Streaming scene descriptions to the UI
+ * - Resource cleanup on destruction
+ *
+ * @param luminaRepository Repository providing access to AI and object detection services
+ * @param getInitializationState Use case for monitoring AI model initialization
+ */
 @HiltViewModel
 class SceneExplorerViewModel @Inject constructor(
-    private val describeSceneUseCase: DescribeSceneUseCase,
-    private val objectDetectorDataSource: ObjectDetectorDataSource
+    private val luminaRepository: LuminaRepository,
+    getInitializationState: GetInitializationStateUseCase
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SceneExplorerUiState())
-    val uiState = _uiState.asStateFlow()
-
-    private var lastFrameTime = 0L
-    private val frameChannel = Channel<Pair<Bitmap, Long>>(capacity = 10) // Bounded channel with capacity 10
-    private val frameFlow = frameChannel.receiveAsFlow()
-
-    init {
-        startObjectDetection()
-    }
-
-    private fun startObjectDetection() {
-        viewModelScope.launch {
-            objectDetectorDataSource.getDetectionStream(frameFlow)
-                .catch { error ->
-                    Log.e("ViewModel", "Object detection error: ${error.localizedMessage}")
-                    _uiState.update { it.copy(detectedObjects = emptyList()) }
-                }
-                .collect { detectedObjects ->
-                    _uiState.update {
-                        it.copy(detectedObjects = detectedObjects)
-                    }
-                    Log.d("ViewModel", "Detected objects: $detectedObjects")
-                }
+    private val descriptionFlow = luminaRepository.getProactiveNavigationCues()
+        .scan("") { accumulator, value ->
+            if (value.isDone) "" else accumulator + value.partialResponse
         }
-    }
-
-    fun onFrameReceived(image: Bitmap) {
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastFrameTime > 500) {
-            Log.d("ViewModel", "Sending frame to detection stream")
-            frameChannel.trySend(Pair(image, currentTime))
-            lastFrameTime = currentTime
-        } else {
-            image.recycle()
-        }
-    }
 
     /**
-     * Called by the UI when a photo is taken.
-     * This function launches a coroutine to process the image and collect the streaming response from the AI.
+     * UI state flow combining initialization status and scene descriptions.
+     * This flow provides a single source of truth for the UI layer.
      */
-    fun onTakePhoto(image: Bitmap) {
-        viewModelScope.launch {
-            var fullResponse = ""
+    val uiState: StateFlow<SceneExplorerUiState> =
+        combine(
+            getInitializationState(),
+            descriptionFlow
+        ) { initState, description ->
+            SceneExplorerUiState(
+                initializationState = initState,
+                description = description
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = SceneExplorerUiState()
+        )
 
-            val imageInput = withContext(Dispatchers.IO) {
-                val stream = ByteArrayOutputStream()
-                image.compress(
-                    Bitmap.CompressFormat.JPEG,
-                    90,
-                    stream
-                ) // 90% quality is a good balance
-                ImageInput(stream.toByteArray())
-            }
-
-            describeSceneUseCase(imageInput)
-                .onStart {
-                    _uiState.update { it.copy(isLoading = true, description = "") }
-                }
-                .catch { error ->
-
-                    _uiState.update {
-                        it.copy(isLoading = false, description = "Error: ${error.localizedMessage}")
-                    }
-                }
-                .collect { sceneDescription ->
-                    fullResponse += sceneDescription.partialResponse
-                    _uiState.update {
-                        it.copy(
-                            isLoading = !sceneDescription.isDone,
-                            description = fullResponse
-                        )
-                    }
-                }
+    /**
+     * Processes a new camera frame for AI analysis.
+     *
+     * This method converts the bitmap to the required format and forwards it to the
+     * repository for object detection and potential AI description generation.
+     * The processing is performed on the IO dispatcher to avoid blocking the UI.
+     *
+     * @param image Camera frame bitmap to be processed
+     */
+    fun onFrameReceived(image: Bitmap) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val stream = ByteArrayOutputStream()
+            image.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+            luminaRepository.processNewFrame(ImageInput(stream.toByteArray()))
+            image.recycle()
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        objectDetectorDataSource.close()
+        luminaRepository.stopProactiveNavigation()
     }
 }
