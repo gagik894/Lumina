@@ -1,16 +1,20 @@
 package com.lumina.app.ui.explorer
 
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.usecase.DescribeSceneUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,16 +26,53 @@ import javax.inject.Inject
  */
 data class SceneExplorerUiState(
     val isLoading: Boolean = false,
-    val description: String = "Point your camera and take a photo to explore the scene."
+    val description: String = "Point your camera and take a photo to explore the scene.",
+    val detectedObjects: List<String> = emptyList()
 )
 
 @HiltViewModel
 class SceneExplorerViewModel @Inject constructor(
-    private val describeSceneUseCase: DescribeSceneUseCase
+    private val describeSceneUseCase: DescribeSceneUseCase,
+    private val objectDetectorDataSource: ObjectDetectorDataSource
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SceneExplorerUiState())
     val uiState = _uiState.asStateFlow()
+
+    private var lastFrameTime = 0L
+    private val frameChannel = Channel<Pair<Bitmap, Long>>(capacity = 10) // Bounded channel with capacity 10
+    private val frameFlow = frameChannel.receiveAsFlow()
+
+    init {
+        startObjectDetection()
+    }
+
+    private fun startObjectDetection() {
+        viewModelScope.launch {
+            objectDetectorDataSource.getDetectionStream(frameFlow)
+                .catch { error ->
+                    Log.e("ViewModel", "Object detection error: ${error.localizedMessage}")
+                    _uiState.update { it.copy(detectedObjects = emptyList()) }
+                }
+                .collect { detectedObjects ->
+                    _uiState.update {
+                        it.copy(detectedObjects = detectedObjects)
+                    }
+                    Log.d("ViewModel", "Detected objects: $detectedObjects")
+                }
+        }
+    }
+
+    fun onFrameReceived(image: Bitmap) {
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastFrameTime > 500) {
+            Log.d("ViewModel", "Sending frame to detection stream")
+            frameChannel.trySend(Pair(image, currentTime))
+            lastFrameTime = currentTime
+        } else {
+            image.recycle()
+        }
+    }
 
     /**
      * Called by the UI when a photo is taken.
@@ -71,5 +112,10 @@ class SceneExplorerViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        objectDetectorDataSource.close()
     }
 }
