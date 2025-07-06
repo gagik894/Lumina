@@ -65,6 +65,7 @@ dependencies {
     implementation(libs.camerax.view)
     implementation(libs.accompanist.permissions)
     implementation(libs.guava)
+    implementation(libs.material.icons.extended)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

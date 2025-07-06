@@ -13,6 +13,7 @@ appcompat = "1.7.1"
 material = "1.12.0"
 hilt = "2.56.2"
 androidx-hilt-navigation-compose = "1.2.0"
+materialIconsExtended = "1.7.8"
 tasksCore = "0.10.14"
 tasksVision = "0.10.14"
 javax-inject = "1"
@@ -47,6 +48,7 @@ hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "androidx-hilt-navigation-compose" }
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javax-inject" }
+material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIconsExtended" }
 mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasksText" }
 mediapipe-tasks-genai = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipeTasksGenai" }
 tasks-core = { group = "com.google.mediapipe", name = "tasks-core", version.ref = "tasksCore" }
