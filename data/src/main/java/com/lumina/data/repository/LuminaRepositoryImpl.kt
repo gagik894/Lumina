@@ -2,8 +2,10 @@ package com.lumina.data.repository
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import com.lumina.data.datasource.AiDataSource
 import com.lumina.data.datasource.ObjectDetectorDataSource
+import com.lumina.data.datasource.TimestampedFrame
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
@@ -19,15 +21,22 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
+private const val TAG = "LuminaRepositoryImpl"
+
 /**
  * Implementation of [LuminaRepository] that coordinates between AI data sources and object detection
  * to provide intelligent navigation assistance for visually impaired users.
  *
- * This repository implements an intelligent "Director Pattern" with a sophisticated decision tree:
- * - Rule 1: Critical threats (immediate obstacles)
- * - Rule 2: Important new objects appearing
- * - Rule 3: Periodic ambient updates
+ * This repository implements an intelligent "Director Pattern" with optimized motion analysis:
+ * - Rule 1: Critical threats (immediate obstacles with motion context)
+ * - Rule 2: Important new objects appearing (with movement tracking)
+ * - Rule 3: Periodic ambient updates (with scene changes)
  * - Rule 4: Stable state (power saving mode)
+ *
+ * Motion Analysis Features:
+ * - Collects 3-5 frames over 200-300ms windows
+ * - Provides timing context to AI for movement detection
+ * - Optimized for fast response times while maintaining accuracy
  *
  * @param gemmaDataSource The AI data source responsible for generating scene descriptions
  * @param objectDetectorDataSource The data source for detecting objects in camera frames
@@ -73,6 +82,21 @@ class LuminaRepositoryImpl @Inject constructor(
     /** Object tracking for change detection */
     private var lastSeenObjects = emptySet<String>()
 
+    /**
+     * Circular buffer for timestamped frames optimized for motion analysis.
+     * Maintains frames to allow sampling 2 frames ~30 frames apart for optimal motion detection.
+     */
+    private val frameBuffer = ArrayDeque<TimestampedFrame>(35) // Increased to hold more frames
+
+    /** Frame sampling interval for motion analysis (every 30th frame) */
+    private val motionSamplingInterval = 30
+
+    /** Counter to track frame sampling for motion analysis */
+    private var frameCounter = 0
+
+    /** Maximum time span for frame sequences (in milliseconds) */
+    private val maxFrameSequenceTimeMs = 1000L // Increased to allow for 30-frame spacing
+
     override fun getNavigationCues(): Flow<NavigationCue> {
         if (navigationJob == null || navigationJob?.isActive == false) {
             startDirectorPipeline()
@@ -81,15 +105,16 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     override suspend fun processNewFrame(image: ImageInput) {
-        // Convert domain model to Bitmap and send to the channel
         val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
-        frameFlow.tryEmit(Pair(bitmap, System.currentTimeMillis()))
+        val timestamp = System.currentTimeMillis()
+        frameFlow.tryEmit(Pair(bitmap, timestamp))
     }
 
     override fun stopNavigation() {
         navigationJob?.cancel()
         objectDetectorDataSource.close()
         gemmaDataSource.resetSession()
+        frameBuffer.clear()
     }
 
     override fun describeScene(
@@ -100,21 +125,13 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Starts the Director Pipeline with intelligent decision tree for navigation cues.
-     *
-     * Implements a 4-rule decision system:
-     * 1. Critical threats (immediate obstacles)
-     * 2. Important new objects
-     * 3. Periodic ambient updates
-     * 4. Stable state (power saving)
+     * Starts the Director Pipeline with intelligent decision tree and motion analysis.
      */
     private fun startDirectorPipeline() {
         navigationJob = repositoryScope.launch {
-            var currentFrame: Bitmap? = null
-
             launch {
-                frameFlow.collect { (bitmap, _) ->
-                    currentFrame = bitmap
+                frameFlow.collect { (bitmap, timestamp) ->
+                    updateFrameBuffer(bitmap, timestamp)
                 }
             }
 
@@ -122,34 +139,34 @@ class LuminaRepositoryImpl @Inject constructor(
                 .collect { detectedObjects ->
                     val currentTime = System.currentTimeMillis()
                     val currentObjectLabels = detectedObjects.toSet()
+                    val motionFrames = getMotionAnalysisFrames()
 
-                    // Rule 1: Check for CRITICAL threats
+                    // Rule 1: Check for CRITICAL threats with motion analysis
                     if (checkCriticalThreats(detectedObjects, currentTime)) {
-                        currentFrame?.let { frame ->
-                            triggerCriticalAlert(frame)
+                        if (motionFrames.isNotEmpty()) {
+                            triggerCriticalAlert(motionFrames)
                         }
                         lastSeenObjects = currentObjectLabels
                         return@collect
                     }
 
-                    // Rule 2: Check for IMPORTANT new objects
+                    // Rule 2: Check for IMPORTANT new objects with movement context
                     val newImportantObjects = findNewImportantObjects(currentObjectLabels)
                     if (newImportantObjects.isNotEmpty() &&
                         (currentTime - lastInformationalAlertTime) > 5000
                     ) {
-
-                        currentFrame?.let { frame ->
-                            triggerInformationalAlert(frame, newImportantObjects)
+                        if (motionFrames.isNotEmpty()) {
+                            triggerInformationalAlert(motionFrames, newImportantObjects)
                         }
                         lastInformationalAlertTime = currentTime
                         lastSeenObjects = currentObjectLabels
                         return@collect
                     }
 
-                    // Rule 3: Check for AMBIENT update timing
+                    // Rule 3: Check for AMBIENT update timing with scene context
                     if ((currentTime - lastAmbientUpdateTime) > 30000) { // 30 seconds
-                        currentFrame?.let { frame ->
-                            triggerAmbientUpdate(frame)
+                        if (motionFrames.isNotEmpty()) {
+                            triggerAmbientUpdate(motionFrames)
                         }
                         lastAmbientUpdateTime = currentTime
                         lastSeenObjects = currentObjectLabels
@@ -163,19 +180,67 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     /**
+     * Updates the frame buffer with new timestamped frames.
+     * Maintains optimal frame count and timing for motion analysis with 30-frame sampling.
+     */
+    private fun updateFrameBuffer(bitmap: Bitmap, timestamp: Long) {
+        synchronized(frameBuffer) {
+            frameCounter++
+
+            // Only add every frame to maintain continuous sampling capability
+            frameBuffer.add(TimestampedFrame(bitmap, timestamp))
+
+            // Remove old frames that exceed buffer size
+            while (frameBuffer.size > 35) {
+                frameBuffer.removeFirst()
+            }
+
+            // Remove frames that are too old for motion analysis
+            val cutoffTime = timestamp - maxFrameSequenceTimeMs
+            while (frameBuffer.isNotEmpty() && frameBuffer.first().timestampMs < cutoffTime) {
+                frameBuffer.removeFirst()
+            }
+        }
+    }
+
+    /**
+     * Gets 2 frames spaced approximately 30 frames apart for optimal motion detection.
+     * Returns the most recent frame and a frame from ~30 frames ago.
+     */
+    private fun getMotionAnalysisFrames(): List<TimestampedFrame> {
+        synchronized(frameBuffer) {
+            if (frameBuffer.size < 2) {
+                return frameBuffer.toList()
+            }
+
+            val latestFrame = frameBuffer.last()
+
+            // Try to get a frame that's approximately 30 frames back
+            val targetIndex = maxOf(0, frameBuffer.size - 1 - motionSamplingInterval)
+            val olderFrame = if (targetIndex < frameBuffer.size) {
+                frameBuffer[targetIndex]
+            } else {
+                frameBuffer.first() // Fallback to oldest available frame
+            }
+
+            // Return in chronological order (older frame first, then latest)
+            return if (olderFrame != latestFrame) {
+                listOf(olderFrame, latestFrame)
+            } else {
+                listOf(latestFrame) // Only one frame available
+            }
+        }
+    }
+
+    /**
      * Rule 1: Checks for critical threats requiring immediate attention.
-     *
-     * @param detectedObjects Current frame's detected objects with bounding boxes
-     * @param currentTime Current timestamp
-     * @return true if critical threat detected
      */
     private fun checkCriticalThreats(detectedObjects: List<String>, currentTime: Long): Boolean {
-        // For now, using simplified logic until we get bounding box data from ObjectDetectorDataSource
         val criticalObjectsPresent = detectedObjects.filter { it in criticalObjects }
 
         if (criticalObjectsPresent.isNotEmpty() &&
-            (currentTime - lastCriticalAlertTime) > 3000
-        ) { // 3 second cooldown for critical
+            (currentTime - lastCriticalAlertTime) > 3000 // 3 second cooldown
+        ) {
             lastCriticalAlertTime = currentTime
             return true
         }
@@ -185,9 +250,6 @@ class LuminaRepositoryImpl @Inject constructor(
 
     /**
      * Rule 2: Finds new important objects that warrant informational alerts.
-     *
-     * @param currentObjects Set of currently detected object labels
-     * @return List of new important objects
      */
     private fun findNewImportantObjects(currentObjects: Set<String>): List<String> {
         val newObjects = currentObjects - lastSeenObjects
@@ -195,12 +257,12 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Triggers a critical alert for immediate threats.
+     * Triggers a critical alert with motion analysis for immediate threats.
      */
-    private suspend fun triggerCriticalAlert(frame: Bitmap) {
+    private suspend fun triggerCriticalAlert(frames: List<TimestampedFrame>) {
         val prompt = "IMMEDIATE OBSTACLE. NAME IT IN 3 WORDS."
-
-        gemmaDataSource.generateResponse(prompt, frame)
+        Log.i(TAG, "triggerCriticalAlert: ")
+        gemmaDataSource.generateResponse(prompt, frames)
             .collect { (partialResponse, isDone) ->
                 val criticalAlert = NavigationCue.CriticalAlert(partialResponse, isDone)
                 navigationCueFlow.emit(criticalAlert)
@@ -208,18 +270,22 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Triggers an informational alert for new important objects.
+     * Triggers an informational alert with movement context for new important objects.
      */
-    private suspend fun triggerInformationalAlert(frame: Bitmap, newObjects: List<String>) {
+    private suspend fun triggerInformationalAlert(
+        frames: List<TimestampedFrame>,
+        newObjects: List<String>
+    ) {
+        Log.i(TAG, "triggerInformationalAlert: ")
         val objectContext = if (newObjects.isNotEmpty()) {
             " A new ${newObjects.first()} has appeared."
         } else {
             ""
         }
 
-        val prompt = "fast describe image, just most important for a blind.$objectContext"
+        val prompt = "fast describe image, just most important for a blind."
 
-        gemmaDataSource.generateResponse(prompt, frame)
+        gemmaDataSource.generateResponse(prompt, frames)
             .collect { (partialResponse, isDone) ->
                 val informationalAlert = NavigationCue.InformationalAlert(partialResponse, isDone)
                 navigationCueFlow.emit(informationalAlert)
@@ -227,12 +293,12 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Triggers an ambient update for general environmental context.
+     * Triggers an ambient update with scene change detection.
      */
-    private suspend fun triggerAmbientUpdate(frame: Bitmap) {
+    private suspend fun triggerAmbientUpdate(frames: List<TimestampedFrame>) {
         val prompt = "Briefly describe the general surroundings for a blind user."
-
-        gemmaDataSource.generateResponse(prompt, frame)
+        Log.i(TAG, "triggerAmbientUpdate: ")
+        gemmaDataSource.generateResponse(prompt, frames)
             .collect { (partialResponse, isDone) ->
                 val ambientUpdate = NavigationCue.AmbientUpdate(partialResponse, isDone)
                 navigationCueFlow.emit(ambientUpdate)

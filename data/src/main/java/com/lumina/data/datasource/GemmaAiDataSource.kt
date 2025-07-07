@@ -3,6 +3,7 @@ package com.lumina.data.datasource
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import androidx.core.graphics.scale
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
@@ -32,11 +33,13 @@ private const val TAG = "GemmaAiDataSource"
  * This data source manages the lifecycle of the Gemma model, including:
  * - Model initialization and caching
  * - Session management with token limit handling
- * - Streaming response generation
+ * - Streaming response generation with motion analysis
  * - Resource cleanup
  *
- * The implementation includes intelligent session management to prevent token limit exceeded errors
- * by tracking token usage and automatically resetting sessions when approaching the limit.
+ * The implementation includes:
+ * - Intelligent session management to prevent token limit exceeded errors
+ * - Multi-frame motion analysis for better navigation assistance
+ * - Optimized image processing to prevent out-of-memory errors
  */
 @Singleton
 class GemmaAiDataSource @Inject constructor(
@@ -48,10 +51,13 @@ class GemmaAiDataSource @Inject constructor(
 
     private var llmInference: LlmInference? = null
     private var session: LlmInferenceSession? = null
+    private var approximateTokenCount = 0
 
-    /** Current approximate token count to prevent exceeding model limits */
-    private var tokenCount = 0
-    private val maxTokens = 4000
+    /** Conservative token limit to prevent OUT_OF_RANGE errors */
+    private val maxTokens = 3500
+
+    /** Maximum image dimension for processing to prevent OOM */
+    private val maxImageDimension = 512
 
     private val _initializationState =
         MutableStateFlow<InitializationState>(InitializationState.NotInitialized)
@@ -75,57 +81,69 @@ class GemmaAiDataSource @Inject constructor(
         coroutineScope.launch {
             try {
                 _initializationState.value = InitializationState.Initializing
+
                 val modelPath = getAbsoluteModelPath(modelName)
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelPath)
                     .setPreferredBackend(LlmInference.Backend.GPU)
                     .setMaxTokens(4096)
-                    .setMaxNumImages(10)
+                    .setMaxNumImages(5)
                     .build()
+
                 llmInference = LlmInference.createFromOptions(context, options)
-
-                val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-                    .setTemperature(0.8f)
-                    .setTopK(40)
-                    .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
-                    .build()
-                session = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
-
-                session?.addQueryChunk(
-                    "You are 'Lumina', a highly advanced AI assistant for blind and low-vision users. " +
-                            "Your primary goal is to provide fast, clear, and concise descriptions of the user's surroundings. " +
-                            "Always prioritize safety and key objects. Your responses must be direct and objective. Do not use conversational filler."
-                )
+                createNewSession()
 
                 _initializationState.value = InitializationState.Initialized
+                Log.d(TAG, "Gemma AI initialized successfully")
             } catch (e: Exception) {
-                _initializationState.value =
-                    InitializationState.Error("Failed to initialize Gemma AI: ${e.message}")
+                _initializationState.value = InitializationState.Error(
+                    "Failed to initialize Gemma AI: ${e.message}"
+                )
                 Log.e(TAG, "Initialization failed", e)
             }
         }
     }
 
     /**
-     * Creates a new inference session with the system prompt.
+     * Creates a new inference session with the optimized system prompt.
      *
      * @return A new [LlmInferenceSession] configured for vision tasks
      */
     private fun createNewSession(): LlmInferenceSession {
         val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-            .setTemperature(0.8f)
-            .setTopK(40)
+            .setTemperature(0.7f) // Slightly more focused responses
+            .setTopK(30) // Reduced for faster inference
+            .setTopP(0.9f)
             .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
             .build()
+
         val newSession = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
 
-        newSession.addQueryChunk(
-            "You are 'Lumina', a highly advanced AI assistant for blind and low-vision users. " +
-                    "Your primary goal is to provide fast, clear, and concise descriptions of the user's surroundings. " +
-                    "Always prioritize safety and key objects. Your responses must be direct and objective. Do not use conversational filler."
-        )
+        val systemPrompt =
+            """You are an AI assistant for blind users providing real-time navigation assistance.
+            CRITICAL RULES:
+            - Be extremely concise and direct
+            - Prioritize safety threats and moving objects (e.g., cars, pedestrians, crosswalks, stairs, 
+              curbs, etc.)
+            - When analyzing multiple frames, identify movement patterns, for example:
+              - "Car approaching fast"
+              - "Pedestrian moving left",
+            no need to describe static objects
+            - Maximum 5 words per response for critical alerts (E.g., "Car approaching fast")
+            - Maximum 10 words for informational updates (E.g., "New pedestrian entering scene")
+            
+            MOVEMENT ANALYSIS:
+            When given multiple images in sequence, analyze:
+            1. Object movement direction and speed
+            2. Potential collision risks 
+            
+            Respond with actionable navigation guidance. (E.g., "Turn left now" or Stop immediately")
+            """
 
-        tokenCount = 50 // Approximate tokens for system prompt
+        newSession.addQueryChunk(systemPrompt)
+        approximateTokenCount = estimateTokens(systemPrompt)
+
+        session = newSession
         return newSession
     }
 
@@ -135,96 +153,193 @@ class GemmaAiDataSource @Inject constructor(
      * @return An active [LlmInferenceSession] ready for inference
      */
     private fun getOrCreateSession(): LlmInferenceSession {
-        if (session == null || tokenCount > maxTokens) {
+        return if (session == null || approximateTokenCount > maxTokens) {
             session?.close()
-            session = createNewSession()
+            createNewSession()
+        } else {
+            session!!
         }
-        return session!!
     }
 
     /**
-     * Generates a response for the given prompt and image.
-     *
-     * This method streams the response in real-time as the AI processes the input.
-     * It also handles token management to avoid exceeding the model's limits.
-     *
-     * @param prompt The text prompt to guide the AI response
-     * @param image An optional image to provide context for the response
-     * @return A flow of response chunks and completion status
+     * Generates a response for multiple timestamped frames with motion analysis.
+     * This is the preferred method for navigation assistance.
      */
-    override fun generateResponse(prompt: String, image: Bitmap): Flow<Pair<String, Boolean>> =
-        callbackFlow {
+    override fun generateResponse(
+        prompt: String,
+        frames: List<TimestampedFrame>
+    ): Flow<Pair<String, Boolean>> = callbackFlow {
         try {
             val currentSession = getOrCreateSession()
 
-            val promptTokens = prompt.length / 4
-            val imageTokens = 50
-            tokenCount += promptTokens + imageTokens
+            // Calculate timing information for motion context
+            val timeSpanMs = if (frames.size > 1) {
+                frames.last().timestampMs - frames.first().timestampMs
+            } else 0L
 
-            currentSession.addQueryChunk(prompt)
-            currentSession.addImage(BitmapImageBuilder(image).build())
+            val motionContextPrompt = buildMotionContextPrompt(prompt, frames.size, timeSpanMs)
+
+            // Add prompt and track tokens
+            currentSession.addQueryChunk(motionContextPrompt)
+            approximateTokenCount += estimateTokens(motionContextPrompt)
+
+            // Add frames in chronological order
+            frames.forEach { frame ->
+                val scaledBitmap = scaleImageForProcessing(frame.bitmap)
+                currentSession.addImage(BitmapImageBuilder(scaledBitmap).build())
+
+                // Clean up if we created a new bitmap
+                if (scaledBitmap != frame.bitmap) {
+                    scaledBitmap.recycle()
+                }
+            }
+
+            // Estimate tokens for images (conservative estimate)
+            approximateTokenCount += frames.size * 200
+
+            // Generate response asynchronously with streaming callback
             currentSession.generateResponseAsync { partialResult, done ->
                 Log.d(TAG, "generateResponse: Partial result: $partialResult, Done: $done")
 
                 if (done) {
-                    tokenCount += partialResult.length / 4
+                    approximateTokenCount += estimateTokens(partialResult)
                 }
-                
+
                 trySend(Pair(partialResult, done))
                 if (done) {
                     channel.close()
                 }
             }
+
         } catch (e: Exception) {
-            Log.e(TAG, "Error in generateResponse", e)
+            Log.e(TAG, "Error in generateResponse with frames", e)
             resetSession()
             close(e)
         }
+
+        awaitClose { }
+    }
+
+    /**
+     * Legacy method for single image analysis.
+     */
+    override fun generateResponse(prompt: String, image: Bitmap): Flow<Pair<String, Boolean>> =
+        callbackFlow {
+            try {
+                val currentSession = getOrCreateSession()
+
+                val promptTokens = estimateTokens(prompt)
+                val imageTokens = 200 // Conservative estimate for scaled image
+                approximateTokenCount += promptTokens + imageTokens
+
+                currentSession.addQueryChunk(prompt)
+                val scaledBitmap = scaleImageForProcessing(image)
+                currentSession.addImage(BitmapImageBuilder(scaledBitmap).build())
+
+                // Clean up if we created a new bitmap
+                if (scaledBitmap != image) {
+                    scaledBitmap.recycle()
+                }
+
+                currentSession.generateResponseAsync { partialResult, done ->
+                    Log.d(TAG, "generateResponse: Partial result: $partialResult, Done: $done")
+
+                    if (done) {
+                        approximateTokenCount += estimateTokens(partialResult)
+                    }
+
+                    trySend(Pair(partialResult, done))
+                    if (done) {
+                        channel.close()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in generateResponse", e)
+                resetSession()
+                close(e)
+            }
 
             awaitClose { }
         }
 
     /**
-     * Resets the current session, releasing any resources.
-     *
-     * This method should be called when the application no longer needs the AI model
-     * or when an error occurs that requires re-initialization.
+     * Builds a motion-aware prompt that helps the AI understand timing and movement.
      */
-    override fun resetSession() {
-        session?.close()
-        session = null
-        tokenCount = 0
+    private fun buildMotionContextPrompt(
+        userPrompt: String,
+        frameCount: Int,
+        timeSpanMs: Long
+    ): String {
+        val motionContext = when {
+            frameCount == 1 -> "Analyze this single frame."
+            timeSpanMs > 0 -> "Analyze $frameCount frames captured over ${timeSpanMs}ms. " +
+                    "Identify any movement, direction changes, or objects entering/leaving the scene."
+
+            else -> "Analyze these $frameCount sequential frames for movement patterns."
+        }
+
+        return "$motionContext $userPrompt"
     }
 
     /**
-     * Closes the AI data source, releasing all resources.
-     *
-     * This method should be called in the application's onDestroy or equivalent lifecycle
-     * method to prevent memory leaks.
+     * Scales image to optimal size for processing, preventing OOM while maintaining quality.
      */
+    private fun scaleImageForProcessing(bitmap: Bitmap): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+
+        if (width <= maxImageDimension && height <= maxImageDimension) {
+            return bitmap
+        }
+
+        val scaleFactor = maxImageDimension.toFloat() / maxOf(width, height)
+        val newWidth = (width * scaleFactor).toInt()
+        val newHeight = (height * scaleFactor).toInt()
+
+        return bitmap.scale(newWidth, newHeight)
+    }
+
+    /**
+     * Estimates token count for text (rough approximation).
+     */
+    private fun estimateTokens(text: String): Int {
+        return text.length / 3 // Conservative estimate
+    }
+
+    override fun resetSession() {
+        session?.close()
+        session = null
+        approximateTokenCount = 0
+        Log.d(TAG, "Session reset")
+    }
+
     override fun close() {
         try {
             session?.close()
             llmInference?.close()
+            Log.d(TAG, "Resources closed")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Error closing resources", e)
         }
     }
 
     /**
      * Copies the model from assets to cache directory if not already present.
-     *
-     * @param modelName The name of the model file in assets
-     * @return The absolute path to the cached model file
      */
     private fun getAbsoluteModelPath(modelName: String): String {
         val destinationFile = File(context.cacheDir, modelName)
-        if (destinationFile.exists()) return destinationFile.absolutePath
+        if (destinationFile.exists()) {
+            Log.d(TAG, "Model already cached at: ${destinationFile.absolutePath}")
+            return destinationFile.absolutePath
+        }
+
+        Log.d(TAG, "Copying model to cache...")
         context.assets.open(modelName).use { inputStream ->
             FileOutputStream(destinationFile).use { outputStream ->
                 inputStream.copyTo(outputStream)
             }
         }
+        Log.d(TAG, "Model cached at: ${destinationFile.absolutePath}")
         return destinationFile.absolutePath
     }
 }
