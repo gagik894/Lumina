@@ -17,6 +17,8 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -121,7 +123,22 @@ class LuminaRepositoryImpl @Inject constructor(
         image: ImageInput,
         prompt: String
     ): Flow<NavigationCue> {
-        TODO("Manual scene description not yet implemented")
+        // Converts the encoded image bytes to a Bitmap required by GemmaAI.
+        val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+
+        /*
+         * Uses GemmaAiDataSource’s single-image pipeline to obtain a detailed
+         * description.  The response stream is mapped to an InformationalAlert so
+         * it can be consumed by the UI and TTS layers without special-case logic.
+         */
+        return gemmaDataSource.generateResponse(prompt, bitmap)
+            .map { (partialResult, done) ->
+                NavigationCue.InformationalAlert(partialResult, done)
+            }
+            .onCompletion {
+                // Releases native memory once streaming completes.
+                bitmap.recycle()
+            }
     }
 
     /**
@@ -137,6 +154,7 @@ class LuminaRepositoryImpl @Inject constructor(
 
             objectDetectorDataSource.getDetectionStream(frameFlow)
                 .collect { detectedObjects ->
+                    Log.i(TAG, "Detected objects: $detectedObjects")
                     val currentTime = System.currentTimeMillis()
                     val currentObjectLabels = detectedObjects.toSet()
                     val motionFrames = getMotionAnalysisFrames()
@@ -164,7 +182,7 @@ class LuminaRepositoryImpl @Inject constructor(
                     }
 
                     // Rule 3: Check for AMBIENT update timing with scene context
-                    if ((currentTime - lastAmbientUpdateTime) > 30000) { // 30 seconds
+                    if ((currentTime - lastAmbientUpdateTime) > 300000) { // 30 seconds
                         if (motionFrames.isNotEmpty()) {
                             triggerAmbientUpdate(motionFrames)
                         }

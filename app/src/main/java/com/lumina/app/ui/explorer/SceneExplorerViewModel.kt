@@ -11,10 +11,12 @@ import com.lumina.domain.service.TextToSpeechService
 import com.lumina.domain.usecase.GetInitializationStateUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
@@ -76,13 +78,24 @@ class SceneExplorerViewModel @Inject constructor(
     private var isTtsInitialized = false
     private val _ttsState = MutableStateFlow(false)
 
+    // Holds the most recent compressed frame so it can be reused for on-demand
+    // "investigate" requests without waiting for the next camera callback.
+    private var lastFrameBytes: ByteArray? = null
+
+    // Emits user-initiated cues (e.g., from investigateScene) into the primary
+    // navigation cue pipeline.
+    private val manualCueFlow = MutableSharedFlow<NavigationCue>()
+
     init {
         initializeTextToSpeech()
     }
 
-    private val navigationCueFlow = luminaRepository.getNavigationCues()
+    private val navigationCueFlow = merge(
+        luminaRepository.getNavigationCues(),
+        manualCueFlow
+    )
         .onEach { navigationCue ->
-            // Speak each chunk as it arrives for real-time feedback
+            // Vocalize each chunk as soon as it arrives for real-time feedback.
             if (_ttsState.value) {
                 val message = when (navigationCue) {
                     is NavigationCue.CriticalAlert -> navigationCue.message
@@ -90,7 +103,7 @@ class SceneExplorerViewModel @Inject constructor(
                     is NavigationCue.AmbientUpdate -> navigationCue.message
                 }
 
-                // Only speak if there's actual content (not empty)
+                // Skip empty strings generated while the model is thinking.
                 if (message.isNotBlank()) {
                     textToSpeechService.speak(navigationCue)
                 }
@@ -180,13 +193,33 @@ class SceneExplorerViewModel @Inject constructor(
             try {
                 val stream = ByteArrayOutputStream()
                 image.compress(Bitmap.CompressFormat.JPEG, 50, stream)
-                luminaRepository.processNewFrame(ImageInput(stream.toByteArray()))
+                val bytes = stream.toByteArray()
+                lastFrameBytes = bytes
+                luminaRepository.processNewFrame(ImageInput(bytes))
             } catch (e: Exception) {
-                // Log the error but don't crash the app
+                // Record the error; the UI continues to function.
                 android.util.Log.e("SceneExplorerViewModel", "Error processing frame", e)
             } finally {
                 image.recycle()
                 isProcessingFrame = false
+            }
+        }
+    }
+
+    /**
+     * Generates a detailed, one-off description of the current scene.  Called
+     * when the user performs the designated gesture (double-tap).
+     */
+    fun investigateScene() {
+        val bytes = lastFrameBytes ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            luminaRepository.describeScene(
+                image = ImageInput(bytes),
+                prompt = "Provide a detailed description of the current scene for a blind user. Focus on layout, key objects, distances, and any potential obstacles."
+            ).collect { cue ->
+                // Forward the cue into the shared flow so that UI and TTS treat
+                // it the same way as continuous navigation cues.
+                manualCueFlow.emit(cue)
             }
         }
     }
