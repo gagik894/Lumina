@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,6 +35,7 @@ class MediaPipeObjectDetector @Inject constructor(
     private val modelName = "efficientdet_lite0.tflite"
     private var objectDetector: ObjectDetector? = null
     private val scope = CoroutineScope(Dispatchers.Main)
+    val lastTimestamp = AtomicLong(0L)
 
     override fun getDetectionStream(imageStream: Flow<Pair<Bitmap, Long>>): Flow<List<String>> =
         callbackFlow {
@@ -49,8 +51,10 @@ class MediaPipeObjectDetector @Inject constructor(
 
             val job: Job = scope.launch {
                 imageStream.collect { (bitmap, timestamp) ->
+                    // MediaPipe requires strictly increasing timestamps.
+                    val safeTimestamp = generateSafeTimestamp(timestamp)
                     val mpImage = BitmapImageBuilder(bitmap).build()
-                    objectDetector?.detectAsync(mpImage, timestamp)
+                    objectDetector?.detectAsync(mpImage, safeTimestamp)
                 }
             }
 
@@ -91,5 +95,16 @@ class MediaPipeObjectDetector @Inject constructor(
             }
         }
         return destinationFile.absolutePath
+    }
+}
+
+/**
+ * Generates a timestamp that is guaranteed to be monotonically increasing.
+ */
+private fun MediaPipeObjectDetector.generateSafeTimestamp(rawTimestamp: Long): Long {
+    while (true) {
+        val prev = lastTimestamp.get()
+        val candidate = if (rawTimestamp > prev) rawTimestamp else prev + 1
+        if (lastTimestamp.compareAndSet(prev, candidate)) return candidate
     }
 }

@@ -1,9 +1,14 @@
 package com.lumina.app.ui.explorer
 
+import android.content.Intent
 import android.os.Build
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,13 +32,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lumina.app.ui.camera.CameraScreen
 import com.lumina.app.ui.common.HandleCameraPermission
 import com.lumina.domain.model.InitializationState
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Locale
+
+private const val TAG = "SceneExplorerScreen"
 
 /**
  * Main screen for the Scene Explorer feature that provides intelligent navigation cues
@@ -56,15 +69,17 @@ fun SceneExplorerScreen(
     viewModel: SceneExplorerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-
+    val context = LocalContext.current
     HandleCameraPermission(
         onPermissionGranted = {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onDoubleTap = { viewModel.investigateScene() })
-                    }
+                    .combinedClickable(
+                        onLongClick = { startVoiceFind(context, viewModel) },
+                        onDoubleClick = { viewModel.investigateScene() },
+                        onClick = {}
+                    )
             ) {
                 when (uiState.initializationState) {
                     is InitializationState.NotInitialized, is InitializationState.Initializing -> {
@@ -92,6 +107,8 @@ fun SceneExplorerScreen(
                                 .align(Alignment.TopEnd)
                                 .padding(16.dp)
                         )
+
+                        // Long-press anywhere to start voice-based Find mode.
                     }
                     is InitializationState.Error -> {
                         Text(
@@ -109,6 +126,72 @@ fun SceneExplorerScreen(
             }
         }
     )
+}
+
+@OptIn(DelicateCoroutinesApi::class)
+private fun startVoiceFind(context: android.content.Context, viewModel: SceneExplorerViewModel) {
+    if (!SpeechRecognizer.isRecognitionAvailable(context)) return
+
+    val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toLanguageTag())
+        putExtra(RecognizerIntent.EXTRA_PROMPT, "What object are you looking for?")
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000)
+    }
+
+    // Audible prompt for the user.
+    viewModel.speak("Listening.")
+
+    var provisional: String? = null
+
+    recognizer.setRecognitionListener(object : RecognitionListener {
+        override fun onResults(results: android.os.Bundle) {
+            Log.d(TAG, "onResults: ${results}")
+            val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            val query = matches?.firstOrNull()?.trim() ?: provisional
+            if (query.isNullOrBlank()) {
+                viewModel.speak("Sorry, I didn't catch that.")
+                return
+            }
+            viewModel.speak("Searching for $query")
+            viewModel.startFindMode(query)
+            recognizer.destroy()
+        }
+
+        override fun onError(error: Int) {
+            Log.d(TAG, "onError:  $error")
+            viewModel.speak("Sorry, I didn't catch that.")
+            recognizer.destroy()
+        }
+
+
+        override fun onReadyForSpeech(params: android.os.Bundle?) {}
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+
+        override fun onEndOfSpeech() {
+            Log.d(TAG, "onEndOfSpeech: ")
+        }
+
+        override fun onPartialResults(partialResults: android.os.Bundle?) {
+            val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            provisional = list?.firstOrNull()?.trim()
+        }
+
+        override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+    })
+
+    // Wait for TTS prompt to finish, then play a start beep and begin listening.
+    GlobalScope.launch(Dispatchers.Main) {
+        while (viewModel.isSpeaking()) {
+            delay(100)
+        }
+        recognizer.startListening(intent)
+    }
 }
 
 /**

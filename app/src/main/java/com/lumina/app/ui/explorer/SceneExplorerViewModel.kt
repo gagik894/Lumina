@@ -11,6 +11,7 @@ import com.lumina.domain.service.TextToSpeechService
 import com.lumina.domain.usecase.GetInitializationStateUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -85,6 +86,8 @@ class SceneExplorerViewModel @Inject constructor(
     // Emits user-initiated cues (e.g., from investigateScene) into the primary
     // navigation cue pipeline.
     private val manualCueFlow = MutableSharedFlow<NavigationCue>()
+
+    private var findJob: Job? = null
 
     init {
         initializeTextToSpeech()
@@ -225,6 +228,24 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
+     * Starts an object-finding session.  The session completes automatically
+     * when the requested object is detected.
+     */
+    fun startFindMode(target: String) {
+        findJob?.cancel()
+        findJob = viewModelScope.launch(Dispatchers.IO) {
+            luminaRepository.findObject(target)
+                .collect { cue -> manualCueFlow.emit(cue) }
+        }
+    }
+
+    /** Stops an active find session, if any. */
+    fun stopFindMode() {
+        findJob?.cancel()
+        findJob = null
+    }
+
+    /**
      * Manually triggers speech for the current description.
      * Useful for repeat functionality.
      */
@@ -251,8 +272,19 @@ class SceneExplorerViewModel @Inject constructor(
         textToSpeechService.setSpeechRate(rate)
     }
 
+    /** Speaks a short prompt through the shared text-to-speech service. */
+    fun speak(text: String) {
+        if (_ttsState.value && text.isNotBlank()) {
+            textToSpeechService.speak(text)
+        }
+    }
+
+    /** Returns true if TTS is currently speaking. */
+    fun isSpeaking(): Boolean = textToSpeechService.isSpeaking()
+
     override fun onCleared() {
         super.onCleared()
+        findJob?.cancel()
         textToSpeechService.shutdown()
         luminaRepository.stopNavigation()
     }

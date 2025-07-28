@@ -51,4 +51,12 @@ interface LuminaRepository {
      * @return A flow of navigation cues containing the scene description
      */
     fun describeScene(image: ImageInput, prompt: String): Flow<NavigationCue>
+
+    /**
+     * Searches the live camera stream for a specific object.
+     * The flow emits a single [NavigationCue] when the object is detected.
+     *
+     * @param target Category label to search for (case-insensitive).
+     */
+    fun findObject(target: String): Flow<NavigationCue>
 }

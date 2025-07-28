@@ -17,8 +17,10 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -141,6 +143,23 @@ class LuminaRepositoryImpl @Inject constructor(
             }
     }
 
+    override fun findObject(target: String): Flow<NavigationCue> {
+        val normalizedTarget = target.lowercase()
+
+        return objectDetectorDataSource
+            .getDetectionStream(frameFlow)
+            .filter { detections ->
+                detections.any { it.equals(normalizedTarget, ignoreCase = true) }
+            }
+            .map {
+                NavigationCue.InformationalAlert("$target detected", true)
+            }
+            .take(1)
+            .onCompletion {
+                Log.i(TAG, "findObject: target '$target' detected; search completed")
+            }
+    }
+
     /**
      * Starts the Director Pipeline with intelligent decision tree and motion analysis.
      */
@@ -182,14 +201,14 @@ class LuminaRepositoryImpl @Inject constructor(
                     }
 
                     // Rule 3: Check for AMBIENT update timing with scene context
-                    if ((currentTime - lastAmbientUpdateTime) > 300000) { // 30 seconds
-                        if (motionFrames.isNotEmpty()) {
-                            triggerAmbientUpdate(motionFrames)
-                        }
-                        lastAmbientUpdateTime = currentTime
-                        lastSeenObjects = currentObjectLabels
-                        return@collect
-                    }
+//                    if ((currentTime - lastAmbientUpdateTime) > 300000) { // 30 seconds
+//                        if (motionFrames.isNotEmpty()) {
+//                            triggerAmbientUpdate(motionFrames)
+//                        }
+//                        lastAmbientUpdateTime = currentTime
+//                        lastSeenObjects = currentObjectLabels
+//                        return@collect
+//                    }
 
                     // Rule 4: STABLE state - do nothing, just update tracking
                     lastSeenObjects = currentObjectLabels
