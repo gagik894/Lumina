@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -60,6 +61,9 @@ class LuminaRepositoryImpl @Inject constructor(
 
     /** Job managing the navigation pipeline */
     private var navigationJob: Job? = null
+
+    /** indicates navigation pipeline is paused */
+    private var navigationPaused = false
 
     /**
      * Shared flow broadcasting camera frames to multiple collectors.
@@ -206,6 +210,24 @@ class LuminaRepositoryImpl @Inject constructor(
         objectDetectorDataSource.close()
         gemmaDataSource.resetSession()
         frameBuffer.clear()
+        navigationPaused = false
+    }
+
+    /** Pauses director pipeline to conserve resources during find mode. */
+    private fun pauseNavigation() {
+        if (navigationJob?.isActive == true) {
+            navigationJob?.cancel()
+            objectDetectorDataSource.close()
+            navigationPaused = true
+        }
+    }
+
+    /** Resumes director pipeline if it was previously paused. */
+    private fun resumeNavigation() {
+        if (navigationPaused) {
+            navigationPaused = false
+            startDirectorPipeline()
+        }
     }
 
     override fun describeScene(
@@ -233,7 +255,7 @@ class LuminaRepositoryImpl @Inject constructor(
     override fun findObject(target: String): Flow<NavigationCue> {
         val normalizedTarget = target.trim().lowercase()
 
-        return if (normalizedTarget in COCO_LABELS) {
+        val baseFlow = if (normalizedTarget in COCO_LABELS) {
             // Use fast object detector for known COCO categories
             objectDetectorDataSource
                 .getDetectionStream(frameFlow)
@@ -286,6 +308,10 @@ class LuminaRepositoryImpl @Inject constructor(
                 awaitClose { collectorJob.cancel() }
             }
         }
+
+        return baseFlow
+            .onStart { pauseNavigation() }
+            .onCompletion { resumeNavigation() }
     }
 
     /**
@@ -427,11 +453,13 @@ class LuminaRepositoryImpl @Inject constructor(
     private suspend fun triggerCriticalAlert(frames: List<TimestampedFrame>) {
         val prompt = "IMMEDIATE OBSTACLE. NAME IT IN 3 WORDS."
         Log.i(TAG, "triggerCriticalAlert: ")
-        gemmaDataSource.generateResponse(prompt, frames)
-            .collect { (partialResponse, isDone) ->
-                val criticalAlert = NavigationCue.CriticalAlert(partialResponse, isDone)
-                navigationCueFlow.emit(criticalAlert)
-            }
+        withDetectorPaused {
+            gemmaDataSource.generateResponse(prompt, frames)
+                .collect { (partialResponse, isDone) ->
+                    val criticalAlert = NavigationCue.CriticalAlert(partialResponse, isDone)
+                    navigationCueFlow.emit(criticalAlert)
+                }
+        }
     }
 
     /**
@@ -450,11 +478,14 @@ class LuminaRepositoryImpl @Inject constructor(
 
         val prompt = "fast describe image, just most important for a blind."
 
-        gemmaDataSource.generateResponse(prompt, frames)
-            .collect { (partialResponse, isDone) ->
-                val informationalAlert = NavigationCue.InformationalAlert(partialResponse, isDone)
-                navigationCueFlow.emit(informationalAlert)
-            }
+        withDetectorPaused {
+            gemmaDataSource.generateResponse(prompt, frames)
+                .collect { (partialResponse, isDone) ->
+                    val informationalAlert =
+                        NavigationCue.InformationalAlert(partialResponse, isDone)
+                    navigationCueFlow.emit(informationalAlert)
+                }
+        }
     }
 
     /**
@@ -463,10 +494,23 @@ class LuminaRepositoryImpl @Inject constructor(
     private suspend fun triggerAmbientUpdate(frames: List<TimestampedFrame>) {
         val prompt = "Briefly describe the general surroundings for a blind user."
         Log.i(TAG, "triggerAmbientUpdate: ")
-        gemmaDataSource.generateResponse(prompt, frames)
-            .collect { (partialResponse, isDone) ->
-                val ambientUpdate = NavigationCue.AmbientUpdate(partialResponse, isDone)
-                navigationCueFlow.emit(ambientUpdate)
-            }
+        withDetectorPaused {
+            gemmaDataSource.generateResponse(prompt, frames)
+                .collect { (partialResponse, isDone) ->
+                    val ambientUpdate = NavigationCue.AmbientUpdate(partialResponse, isDone)
+                    navigationCueFlow.emit(ambientUpdate)
+                }
+        }
+
+    }
+
+    /** Runs a suspend block while temporarily pausing the object detector. */
+    private suspend inline fun withDetectorPaused(block: () -> Unit) {
+        objectDetectorDataSource.setPaused(true)
+        try {
+            block()
+        } finally {
+            objectDetectorDataSource.setPaused(false)
+        }
     }
 }

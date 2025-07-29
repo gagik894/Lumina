@@ -25,6 +25,7 @@ import javax.inject.Singleton
 interface ObjectDetectorDataSource {
     fun getDetectionStream(imageStream: Flow<Pair<Bitmap, Long>>): Flow<List<String>>
     fun close()
+    fun setPaused(paused: Boolean)
 }
 
 @Singleton
@@ -35,7 +36,13 @@ class MediaPipeObjectDetector @Inject constructor(
     private val modelName = "efficientdet_lite0.tflite"
     private var objectDetector: ObjectDetector? = null
     private val scope = CoroutineScope(Dispatchers.Main)
+    @Volatile
+    private var paused = false
     val lastTimestamp = AtomicLong(0L)
+
+    override fun setPaused(paused: Boolean) {
+        this.paused = paused
+    }
 
     override fun getDetectionStream(imageStream: Flow<Pair<Bitmap, Long>>): Flow<List<String>> =
         callbackFlow {
@@ -53,8 +60,10 @@ class MediaPipeObjectDetector @Inject constructor(
                 imageStream.collect { (bitmap, timestamp) ->
                     // MediaPipe requires strictly increasing timestamps.
                     val safeTimestamp = generateSafeTimestamp(timestamp)
-                    val mpImage = BitmapImageBuilder(bitmap).build()
-                    objectDetector?.detectAsync(mpImage, safeTimestamp)
+                    if (!paused) {
+                        val mpImage = BitmapImageBuilder(bitmap).build()
+                        objectDetector?.detectAsync(mpImage, safeTimestamp)
+                    }
                 }
             }
 
