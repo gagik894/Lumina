@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
@@ -50,8 +51,13 @@ class GemmaAiDataSource @Inject constructor(
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var llmInference: LlmInference? = null
-    private var session: LlmInferenceSession? = null
+
+    /** Long-lived session for navigation cues */
+    private var navigationSession: LlmInferenceSession? = null
     private var approximateTokenCount = 0
+
+    /** ensures only one generateResponse runs at a time */
+    private val generationMutex = Mutex()
 
     /** Conservative token limit to prevent OUT_OF_RANGE errors */
     private val maxTokens = 3500
@@ -111,8 +117,8 @@ class GemmaAiDataSource @Inject constructor(
      */
     private fun createNewSession(): LlmInferenceSession {
         val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-            .setTemperature(0.7f) // Slightly more focused responses
-            .setTopK(30) // Reduced for faster inference
+            .setTemperature(0.8f) // Slightly more focused responses
+            .setTopK(40) // Reduced for faster inference
             .setTopP(0.9f)
             .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
             .build()
@@ -144,7 +150,7 @@ class GemmaAiDataSource @Inject constructor(
         newSession.addQueryChunk(systemPrompt)
         approximateTokenCount = estimateTokens(systemPrompt)
 
-        session = newSession
+        navigationSession = newSession
         return newSession
     }
 
@@ -153,12 +159,14 @@ class GemmaAiDataSource @Inject constructor(
      *
      * @return An active [LlmInferenceSession] ready for inference
      */
-    private fun getOrCreateSession(): LlmInferenceSession {
-        return if (session == null || approximateTokenCount > maxTokens) {
-            session?.close()
-            createNewSession()
+    /** Returns the navigation session, creating or refreshing it if needed */
+    private fun getOrCreateNavigationSession(): LlmInferenceSession {
+        return if (navigationSession == null || approximateTokenCount > maxTokens) {
+            navigationSession?.close()
+            navigationSession = createNewSession()
+            navigationSession!!
         } else {
-            session!!
+            navigationSession!!
         }
     }
 
@@ -170,8 +178,9 @@ class GemmaAiDataSource @Inject constructor(
         prompt: String,
         frames: List<TimestampedFrame>
     ): Flow<Pair<String, Boolean>> = callbackFlow {
+        generationMutex.lock()
         try {
-            val currentSession = getOrCreateSession()
+            val currentSession = getOrCreateNavigationSession()
 
             // Calculate timing information for motion context
             val timeSpanMs = if (frames.size > 1) {
@@ -199,26 +208,39 @@ class GemmaAiDataSource @Inject constructor(
             approximateTokenCount += frames.size * 200
 
             // Generate response asynchronously with streaming callback
+            val startTime = System.currentTimeMillis()
+            val uniqueChunks = mutableSetOf<String>()
+
             currentSession.generateResponseAsync { partialResult, done ->
                 Log.d(TAG, "generateResponse: Partial result: $partialResult, Done: $done")
 
-                if (done) {
+                val chunk = partialResult.trim()
+                if (chunk.isNotEmpty()) uniqueChunks.add(chunk)
+
+                // Force-stop conditions: >3 seconds or ≥6 unique chunks
+                val forcedDone =
+                    (System.currentTimeMillis() - startTime > 3_000) || uniqueChunks.size >= 6
+
+                val finalFlag = done || forcedDone
+
+                if (finalFlag) {
                     approximateTokenCount += estimateTokens(partialResult)
                 }
 
-                trySend(Pair(partialResult, done))
-                if (done) {
+                trySend(Pair(partialResult, finalFlag))
+                if (finalFlag) {
                     channel.close()
                 }
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error in generateResponse with frames", e)
-            resetSession()
             close(e)
         }
 
-        awaitClose { }
+        awaitClose {
+            // keep navigation session; no reset
+            generationMutex.unlock()
+        }
     }
 
     /**
@@ -226,8 +248,9 @@ class GemmaAiDataSource @Inject constructor(
      */
     override fun generateResponse(prompt: String, image: Bitmap): Flow<Pair<String, Boolean>> =
         callbackFlow {
+            generationMutex.lock()
             try {
-                val currentSession = getOrCreateSession()
+                val currentSession = getOrCreateNavigationSession()
 
                 val promptTokens = estimateTokens(prompt)
                 val imageTokens = 200 // Conservative estimate for scaled image
@@ -242,25 +265,37 @@ class GemmaAiDataSource @Inject constructor(
                     scaledBitmap.recycle()
                 }
 
+                val startTime = System.currentTimeMillis()
+                val uniqueChunks = mutableSetOf<String>()
+
                 currentSession.generateResponseAsync { partialResult, done ->
                     Log.d(TAG, "generateResponse: Partial result: $partialResult, Done: $done")
 
-                    if (done) {
+                    val chunk = partialResult.trim()
+                    if (chunk.isNotEmpty()) uniqueChunks.add(chunk)
+
+                    val forcedDone =
+                        (System.currentTimeMillis() - startTime > 3_000) || uniqueChunks.size >= 6
+
+                    val finalFlag = done || forcedDone
+
+                    if (finalFlag) {
                         approximateTokenCount += estimateTokens(partialResult)
                     }
 
-                    trySend(Pair(partialResult, done))
-                    if (done) {
+                    trySend(Pair(partialResult, finalFlag))
+                    if (finalFlag) {
                         channel.close()
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error in generateResponse", e)
-                resetSession()
                 close(e)
             }
 
-            awaitClose { }
+            awaitClose {
+                // keep navigation session
+                generationMutex.unlock()
+            }
         }
 
     /**
@@ -308,15 +343,15 @@ class GemmaAiDataSource @Inject constructor(
     }
 
     override fun resetSession() {
-        session?.close()
-        session = null
+        navigationSession?.close()
+        navigationSession = null
         approximateTokenCount = 0
         Log.d(TAG, "Session reset")
     }
 
     override fun close() {
         try {
-            session?.close()
+            navigationSession?.close()
             llmInference?.close()
             Log.d(TAG, "Resources closed")
         } catch (e: Exception) {

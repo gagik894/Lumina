@@ -232,7 +232,7 @@ class SceneExplorerViewModel @Inject constructor(
      * when the requested object is detected.
      */
     fun startFindMode(target: String) {
-        findJob?.cancel()
+        stopFindMode()
         findJob = viewModelScope.launch(Dispatchers.IO) {
             luminaRepository.findObject(target)
                 .collect { cue -> manualCueFlow.emit(cue) }
