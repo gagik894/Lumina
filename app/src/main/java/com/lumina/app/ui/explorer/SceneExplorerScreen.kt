@@ -82,7 +82,7 @@ fun SceneExplorerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .combinedClickable(
-                        onLongClick = { startVoiceFind(context, viewModel) },
+                        onLongClick = { startVoiceCommand(context, viewModel) },
                         onDoubleClick = { viewModel.investigateScene() },
                         onClick = {}
                     )
@@ -152,7 +152,7 @@ fun SceneExplorerScreen(
 }
 
 @OptIn(DelicateCoroutinesApi::class)
-private fun startVoiceFind(context: android.content.Context, viewModel: SceneExplorerViewModel) {
+private fun startVoiceCommand(context: android.content.Context, viewModel: SceneExplorerViewModel) {
     if (!SpeechRecognizer.isRecognitionAvailable(context)) return
 
     val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
@@ -179,8 +179,7 @@ private fun startVoiceFind(context: android.content.Context, viewModel: SceneExp
                 viewModel.speak("Sorry, I didn't catch that.")
                 return
             }
-            viewModel.speak("Searching for $query")
-            viewModel.startFindMode(query)
+            viewModel.handleVoiceCommand(query)
             recognizer.destroy()
         }
 

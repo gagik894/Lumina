@@ -232,10 +232,36 @@ class SceneExplorerViewModel @Inject constructor(
      * when the requested object is detected.
      */
     fun startFindMode(target: String) {
-        stopFindMode()
+        // Interrupt any ongoing speech and previous find session.
+        textToSpeechService.stop()
+        findJob?.cancel()
         findJob = viewModelScope.launch(Dispatchers.IO) {
             luminaRepository.findObject(target)
                 .collect { cue -> manualCueFlow.emit(cue) }
+        }
+    }
+
+    /** Entry point from voice commands. */
+    fun handleVoiceCommand(command: String) {
+        val lower = command.trim().lowercase()
+
+        when {
+            lower.startsWith("find ") -> {
+                val target = lower.removePrefix("find ").trim()
+                if (target.isNotEmpty()) {
+                    speak("Searching for $target")
+                    startFindMode(target)
+                }
+            }
+
+            lower == "cancel" || lower == "stop" -> {
+                stopFindMode()
+                speak("Search cancelled")
+            }
+
+            else -> {
+                speak("Command not recognized")
+            }
         }
     }
 
