@@ -6,6 +6,7 @@ import android.util.Log
 import com.lumina.data.datasource.AiDataSource
 import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.data.datasource.TimestampedFrame
+import com.lumina.data.util.FrameSelector
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
@@ -400,26 +401,7 @@ class LuminaRepositoryImpl @Inject constructor(
      */
     private fun getMotionAnalysisFrames(): List<TimestampedFrame> {
         synchronized(frameBuffer) {
-            if (frameBuffer.size < 2) {
-                return frameBuffer.toList()
-            }
-
-            val latestFrame = frameBuffer.last()
-
-            // Try to get a frame that's approximately 30 frames back
-            val targetIndex = maxOf(0, frameBuffer.size - 1 - motionSamplingInterval)
-            val olderFrame = if (targetIndex < frameBuffer.size) {
-                frameBuffer[targetIndex]
-            } else {
-                frameBuffer.first() // Fallback to oldest available frame
-            }
-
-            // Return in chronological order (older frame first, then latest)
-            return if (olderFrame != latestFrame) {
-                listOf(olderFrame, latestFrame)
-            } else {
-                listOf(latestFrame) // Only one frame available
-            }
+            return FrameSelector.selectMotionFrames(frameBuffer.toList())
         }
     }
 
