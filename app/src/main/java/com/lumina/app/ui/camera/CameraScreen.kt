@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build
 import android.util.Log
+import android.util.Size
 import androidx.annotation.RequiresApi
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -53,11 +54,16 @@ fun CameraScreen(
 
     LaunchedEffect(cameraProviderFuture) {
         val cameraProvider = cameraProviderFuture.await(context)
-        val preview = Preview.Builder().build().also {
+        val preview = Preview.Builder()
+            // Match preview to analysis resolution for consistent aspect ratio.
+            .setTargetResolution(Size(640, 480))
+            .build().also {
             it.surfaceProvider = previewView.surfaceProvider
         }
 
         val imageAnalyzer = ImageAnalysis.Builder()
+            // Reduce resolution to save processing power and bandwidth.
+            .setTargetResolution(Size(640, 480))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
             .also {
