@@ -14,9 +14,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
@@ -101,6 +103,91 @@ class LuminaRepositoryImpl @Inject constructor(
     /** Maximum time span for frame sequences (in milliseconds) */
     private val maxFrameSequenceTimeMs = 1000L // Increased to allow for 30-frame spacing
 
+    companion object {
+        private val COCO_LABELS = setOf(
+            "person",
+            "bicycle",
+            "car",
+            "motorcycle",
+            "airplane",
+            "bus",
+            "train",
+            "truck",
+            "boat",
+            "traffic light",
+            "fire hydrant",
+            "stop sign",
+            "parking meter",
+            "bench",
+            "bird",
+            "cat",
+            "dog",
+            "horse",
+            "sheep",
+            "cow",
+            "elephant",
+            "bear",
+            "zebra",
+            "giraffe",
+            "backpack",
+            "umbrella",
+            "handbag",
+            "tie",
+            "suitcase",
+            "frisbee",
+            "skis",
+            "snowboard",
+            "sports ball",
+            "kite",
+            "baseball bat",
+            "baseball glove",
+            "skateboard",
+            "surfboard",
+            "tennis racket",
+            "bottle",
+            "wine glass",
+            "cup",
+            "fork",
+            "knife",
+            "spoon",
+            "bowl",
+            "banana",
+            "apple",
+            "sandwich",
+            "orange",
+            "broccoli",
+            "carrot",
+            "hot dog",
+            "pizza",
+            "donut",
+            "cake",
+            "chair",
+            "couch",
+            "potted plant",
+            "bed",
+            "dining table",
+            "toilet",
+            "tv",
+            "laptop",
+            "mouse",
+            "remote",
+            "keyboard",
+            "cell phone",
+            "microwave",
+            "oven",
+            "toaster",
+            "sink",
+            "refrigerator",
+            "book",
+            "clock",
+            "vase",
+            "scissors",
+            "teddy bear",
+            "hair drier",
+            "toothbrush"
+        )
+    }
+
     override fun getNavigationCues(): Flow<NavigationCue> {
         if (navigationJob == null || navigationJob?.isActive == false) {
             startDirectorPipeline()
@@ -144,20 +231,61 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     override fun findObject(target: String): Flow<NavigationCue> {
-        val normalizedTarget = target.lowercase()
+        val normalizedTarget = target.trim().lowercase()
 
-        return objectDetectorDataSource
-            .getDetectionStream(frameFlow)
-            .filter { detections ->
-                detections.any { it.equals(normalizedTarget, ignoreCase = true) }
+        return if (normalizedTarget in COCO_LABELS) {
+            // Use fast object detector for known COCO categories
+            objectDetectorDataSource
+                .getDetectionStream(frameFlow)
+                .filter { detections ->
+                    detections.any { it.equals(normalizedTarget, ignoreCase = true) }
+                }
+                .map { NavigationCue.InformationalAlert("$target detected", true) }
+                .take(1)
+                .onCompletion {
+                    Log.i(TAG, "findObject: '$target' detected via MediaPipe")
+                }
+        } else {
+            // Fallback to Gemma vision capabilities for arbitrary objects
+            callbackFlow {
+                var isProcessing = false
+                val prompt = "Answer yes or no only. Do you see a $target in the image?"
+
+                val collectorJob = repositoryScope.launch {
+                    frameFlow.collect { (bitmap, _) ->
+                        if (isProcessing) return@collect
+
+                        isProcessing = true
+
+                        val answerBuilder = StringBuilder()
+
+                        gemmaDataSource.generateResponse(prompt, bitmap)
+                            .collect { (text, done) ->
+                                if (text.isNotBlank()) answerBuilder.append(text)
+
+                                if (done) {
+                                    val response = answerBuilder.toString().trim().lowercase()
+                                    val affirmative = response.startsWith("y")
+
+                                    if (affirmative) {
+                                        trySend(
+                                            NavigationCue.InformationalAlert(
+                                                "$target detected",
+                                                true
+                                            )
+                                        )
+                                        this@callbackFlow.close()
+                                    }
+                                    // else continue listening to further frames
+                                    isProcessing = false
+                                }
+                            }
+                    }
+                }
+
+                awaitClose { collectorJob.cancel() }
             }
-            .map {
-                NavigationCue.InformationalAlert("$target detected", true)
-            }
-            .take(1)
-            .onCompletion {
-                Log.i(TAG, "findObject: target '$target' detected; search completed")
-            }
+        }
     }
 
     /**
