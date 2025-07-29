@@ -19,9 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +32,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -70,6 +75,7 @@ fun SceneExplorerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val previewToggle = remember { mutableStateOf(false) }
     HandleCameraPermission(
         onPermissionGranted = {
             Box(
@@ -86,7 +92,24 @@ fun SceneExplorerScreen(
                         InitializationScreen(uiState.isTtsInitialized)
                     }
                     is InitializationState.Initialized -> {
-                        CameraScreen(onFrame = viewModel::onFrameReceived)
+                        CameraScreen(
+                            onFrame = viewModel::onFrameReceived,
+                            showPreview = previewToggle.value
+                        )
+
+//                        if (BuildConfig.DEBUG) {
+                        FloatingActionButton(
+                            onClick = { previewToggle.value = !previewToggle.value },
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(16.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (previewToggle.value) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = "Toggle preview"
+                            )
+                        }
+//                        }
 
                         if (uiState.description.isNotEmpty()) {
                             NavigationCueDisplay(

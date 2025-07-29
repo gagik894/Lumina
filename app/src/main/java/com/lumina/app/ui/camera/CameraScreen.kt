@@ -2,10 +2,15 @@ package com.lumina.app.ui.camera
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.util.Log
+import android.util.Range
 import android.util.Size
+import androidx.annotation.OptIn
 import androidx.annotation.RequiresApi
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -42,29 +47,32 @@ private const val TAG = "CameraScreen"
  * @param onFrame Callback invoked for each camera frame, receiving a Bitmap for analysis
  */
 @RequiresApi(Build.VERSION_CODES.P)
-@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
+@OptIn(ExperimentalCamera2Interop::class, androidx.camera.core.ExperimentalGetImage::class)
 @Composable
 fun CameraScreen(
-    onFrame: (Bitmap) -> Unit
+    onFrame: (Bitmap) -> Unit,
+    showPreview: Boolean = false
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     val previewView = remember { PreviewView(context) }
 
-    LaunchedEffect(cameraProviderFuture) {
+    LaunchedEffect(cameraProviderFuture, showPreview) {
         val cameraProvider = cameraProviderFuture.await(context)
-        val preview = Preview.Builder()
-            // Match preview to analysis resolution for consistent aspect ratio.
-            .setTargetResolution(Size(640, 480))
-            .build().also {
-            it.surfaceProvider = previewView.surfaceProvider
-        }
 
-        val imageAnalyzer = ImageAnalysis.Builder()
-            // Reduce resolution to save processing power and bandwidth.
-            .setTargetResolution(Size(640, 480))
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        val analysisBuilder = ImageAnalysis.Builder()
+            .setTargetResolution(Size(448, 448))
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_BLOCK_PRODUCER)
+
+        // Apply same FPS range to analysis use case.
+        Camera2Interop.Extender(analysisBuilder)
+            .setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                Range(15, 15)
+            )
+
+        val imageAnalyzer = analysisBuilder
             .build()
             .also {
                 it.setAnalyzer(context.mainExecutor) { imageProxy ->
@@ -78,19 +86,47 @@ fun CameraScreen(
 
         try {
             cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                preview,
-                imageAnalyzer
-            )
+            if (cameraProvider.isBound(imageAnalyzer)) cameraProvider.unbind(imageAnalyzer)
+
+            if (showPreview) {
+                // create preview use case
+                val previewBuilder = Preview.Builder()
+                    .setTargetResolution(Size(448, 448))
+
+                Camera2Interop.Extender(previewBuilder)
+                    .setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                        Range(15, 15)
+                    )
+
+                val preview = previewBuilder.build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
+                }
+
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    imageAnalyzer,
+                    preview
+                )
+            } else {
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    imageAnalyzer
+                )
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Camera binding failed", e)
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        AndroidView({ previewView }, modifier = Modifier.fillMaxSize())
+    if (showPreview) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView({ previewView }, modifier = Modifier.fillMaxSize())
+        }
+    } else {
+        Box(modifier = Modifier.fillMaxSize()) {}
     }
 }
 

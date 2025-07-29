@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetectorResult
@@ -38,6 +39,8 @@ class MediaPipeObjectDetector @Inject constructor(
     private val scope = CoroutineScope(Dispatchers.Main)
     @Volatile
     private var paused = false
+    private val minDetectionIntervalMs = 300L // process at ~3 fps
+    private val lastDetectionTime = AtomicLong(0L)
     val lastTimestamp = AtomicLong(0L)
 
     override fun setPaused(paused: Boolean) {
@@ -61,8 +64,12 @@ class MediaPipeObjectDetector @Inject constructor(
                     // MediaPipe requires strictly increasing timestamps.
                     val safeTimestamp = generateSafeTimestamp(timestamp)
                     if (!paused) {
-                        val mpImage = BitmapImageBuilder(bitmap).build()
-                        objectDetector?.detectAsync(mpImage, safeTimestamp)
+                        val previous = lastDetectionTime.get()
+                        if (timestamp - previous >= minDetectionIntervalMs) {
+                            val mpImage = BitmapImageBuilder(bitmap).build()
+                            objectDetector?.detectAsync(mpImage, safeTimestamp)
+                            lastDetectionTime.set(timestamp)
+                        }
                     }
                 }
             }
@@ -75,12 +82,12 @@ class MediaPipeObjectDetector @Inject constructor(
 
     private fun initializeDetector(listener: (ObjectDetectorResult, MPImage) -> Unit) {
         val modelPath = getAbsoluteModelPath()
-        val baseOptions = BaseOptions.builder().setModelAssetPath(modelPath).build()
-
+        val baseOptions =
+            BaseOptions.builder().setModelAssetPath(modelPath).setDelegate(Delegate.GPU).build()
         val options = ObjectDetector.ObjectDetectorOptions.builder()
             .setBaseOptions(baseOptions)
             .setScoreThreshold(0.5f)
-            .setMaxResults(5)
+            .setMaxResults(10)
             .setRunningMode(RunningMode.LIVE_STREAM)
             .setResultListener(listener)
             .build()
