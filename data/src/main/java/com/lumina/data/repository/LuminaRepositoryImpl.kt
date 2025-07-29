@@ -20,11 +20,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -258,49 +256,91 @@ class LuminaRepositoryImpl @Inject constructor(
 
         val baseFlow = if (normalizedTarget in COCO_LABELS) {
             // Use fast object detector for known COCO categories
-            objectDetectorDataSource
-                .getDetectionStream(frameFlow)
-                .filter { detections ->
-                    detections.any { it.equals(normalizedTarget, ignoreCase = true) }
+            callbackFlow {
+                val detectionsJob = repositoryScope.launch {
+                    objectDetectorDataSource.getDetectionStream(frameFlow)
+                        .collect { detections ->
+                            if (detections.any { it.equals(normalizedTarget, ignoreCase = true) }) {
+                                // Notify user immediately that object is detected.
+                                trySend(NavigationCue.InformationalAlert("$target detected", false))
+
+                                val latestFrame =
+                                    synchronized(frameBuffer) { frameBuffer.lastOrNull() }
+
+                                if (latestFrame == null) return@collect
+
+                                val prompt =
+                                    "Describe the location of the $target relative to the user."
+
+                                withDetectorPaused {
+                                    gemmaDataSource.generateResponse(prompt, latestFrame.bitmap)
+                                        .collect { (text, done) ->
+                                            if (text.isNotBlank()) {
+                                                trySend(
+                                                    NavigationCue.InformationalAlert(
+                                                        text,
+                                                        done
+                                                    )
+                                                )
+                                            }
+                                            if (done) {
+                                                this@callbackFlow.close()
+                                            }
+                                        }
+                                }
+                            }
+                        }
                 }
-                .map { NavigationCue.InformationalAlert("$target detected", true) }
-                .take(1)
-                .onCompletion {
-                    Log.i(TAG, "findObject: '$target' detected via MediaPipe")
-                }
+
+                awaitClose { detectionsJob.cancel() }
+            }
         } else {
             // Fallback to Gemma vision capabilities for arbitrary objects
             callbackFlow {
-                var isProcessing = false
-                val prompt = "Answer yes or no only. Do you see a $target in the image?"
+                var busy = false
+                val detectionPrompt = "Answer yes or no only. Do you see a $target in the image?"
+                val locationPrompt = "Describe the location of the $target relative to the user."
 
                 val collectorJob = repositoryScope.launch {
                     frameFlow.collect { (bitmap, _) ->
-                        if (isProcessing) return@collect
+                        if (busy) return@collect
 
-                        isProcessing = true
+                        busy = true
 
                         val answerBuilder = StringBuilder()
 
-                        gemmaDataSource.generateResponse(prompt, bitmap)
+                        gemmaDataSource.generateResponse(detectionPrompt, bitmap)
                             .collect { (text, done) ->
                                 if (text.isNotBlank()) answerBuilder.append(text)
 
                                 if (done) {
-                                    val response = answerBuilder.toString().trim().lowercase()
-                                    val affirmative = response.startsWith("y")
+                                    val affirmative =
+                                        answerBuilder.toString().trim().lowercase().startsWith("y")
 
                                     if (affirmative) {
+                                        // immediate confirmation
                                         trySend(
                                             NavigationCue.InformationalAlert(
                                                 "$target detected",
-                                                true
+                                                false
                                             )
                                         )
-                                        this@callbackFlow.close()
+
+                                        // location description
+                                        gemmaDataSource.generateResponse(locationPrompt, bitmap)
+                                            .collect { (chunk, d) ->
+                                                if (chunk.isNotBlank())
+                                                    trySend(
+                                                        NavigationCue.InformationalAlert(
+                                                            chunk,
+                                                            d
+                                                        )
+                                                    )
+
+                                                if (d) this@callbackFlow.close()
+                                            }
                                     }
-                                    // else continue listening to further frames
-                                    isProcessing = false
+                                    busy = false
                                 }
                             }
                     }

@@ -29,7 +29,7 @@ interface AiDataSource {
      * This is the preferred method for navigation assistance as it provides context about movement.
      *
      * @param prompt The prompt to guide the description generation
-     * @param frames List of timestamped frames (typically 3-5 frames over 150-300ms)
+     * @param frames List of timestamped frames (typically 2-3 frames over 150-300ms)
      * @return A flow of pairs containing the scene description and completion status
      */
     fun generateResponse(

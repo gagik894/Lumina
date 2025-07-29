@@ -132,12 +132,13 @@ class GemmaAiDataSource @Inject constructor(
             - Maximum 5 words per response for critical alerts (E.g., "Car approaching fast")
             - Maximum 10 words for informational updates (E.g., "New pedestrian entering scene")
             
-            MOVEMENT ANALYSIS:
-            When given multiple images in sequence, analyze:
-            1. Object movement direction and speed
-            2. Potential collision risks 
+            Respond with actionable navigation guidance. (E.g., "Turn left now" or "Stop immediately")
             
-            Respond with actionable navigation guidance. (E.g., "Turn left now" or Stop immediately")
+            
+            FINDER MODE:
+            If asked to locate a specific object, describe its location (e.g., "keyboard centered near") in no more than 6 words.
+
+            IMPORTANT: State your answer ONCE and then stop. Do not repeat or refine the sentence in subsequent tokens.
             """
 
         newSession.addQueryChunk(systemPrompt)
