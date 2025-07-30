@@ -52,6 +52,12 @@ interface LuminaRepository {
      */
     fun describeScene(image: ImageInput, prompt: String): Flow<NavigationCue>
 
+    /** Starts street-crossing guidance; pauses other navigation cues. */
+    fun startCrossingMode()
+
+    /** Stops street-crossing guidance and resumes normal navigation. */
+    fun stopCrossingMode()
+
     /**
      * Searches the live camera stream for a specific object.
      * The flow emits a single [NavigationCue] when the object is detected.

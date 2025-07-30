@@ -232,8 +232,6 @@ class SceneExplorerViewModel @Inject constructor(
      * when the requested object is detected.
      */
     fun startFindMode(target: String) {
-        // Interrupt any ongoing speech and previous find session.
-        textToSpeechService.stop()
         findJob?.cancel()
         findJob = viewModelScope.launch(Dispatchers.IO) {
             luminaRepository.findObject(target)
@@ -256,9 +254,14 @@ class SceneExplorerViewModel @Inject constructor(
 
             lower == "cancel" || lower == "stop" -> {
                 stopFindMode()
+                stopCrossingMode()
                 speak("Search cancelled")
             }
 
+            lower == "cross street" -> {
+                speak("Crossing mode")
+                startCrossingMode()
+            }
             else -> {
                 speak("Command not recognized")
             }
@@ -270,6 +273,10 @@ class SceneExplorerViewModel @Inject constructor(
         findJob?.cancel()
         findJob = null
     }
+
+    // Crossing mode wrappers
+    private fun startCrossingMode() = luminaRepository.startCrossingMode()
+    private fun stopCrossingMode() = luminaRepository.stopCrossingMode()
 
     /**
      * Manually triggers speech for the current description.

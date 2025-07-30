@@ -20,9 +20,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -97,14 +99,17 @@ class LuminaRepositoryImpl @Inject constructor(
      */
     private val frameBuffer = ArrayDeque<TimestampedFrame>(35) // Increased to hold more frames
 
-    /** Frame sampling interval for motion analysis (every 30th frame) */
-    private val motionSamplingInterval = 30
-
     /** Counter to track frame sampling for motion analysis */
     private var frameCounter = 0
 
     /** Maximum time span for frame sequences (in milliseconds) */
     private val maxFrameSequenceTimeMs = 1000L // Increased to allow for 30-frame spacing
+
+    /** Flow for manual cues (e.g., crossing guidance) */
+    private val manualCueFlow = MutableSharedFlow<NavigationCue>()
+
+    /** Job for street crossing guidance */
+    private var crossingJob: Job? = null
 
     companion object {
         private val COCO_LABELS = setOf(
@@ -297,51 +302,41 @@ class LuminaRepositoryImpl @Inject constructor(
         } else {
             // Fallback to Gemma vision capabilities for arbitrary objects
             callbackFlow {
-                var busy = false
                 val detectionPrompt = "Answer yes or no only. Do you see a $target in the image?"
                 val locationPrompt = "Describe the location of the $target relative to the user."
 
                 val collectorJob = repositoryScope.launch {
                     frameFlow.collect { (bitmap, _) ->
-                        if (busy) return@collect
-
-                        busy = true
-
-                        val answerBuilder = StringBuilder()
-
                         gemmaDataSource.generateResponse(detectionPrompt, bitmap)
-                            .collect { (text, done) ->
-                                if (text.isNotBlank()) answerBuilder.append(text)
-
-                                if (done) {
-                                    val affirmative =
-                                        answerBuilder.toString().trim().lowercase().startsWith("y")
-
-                                    if (affirmative) {
-                                        // immediate confirmation
-                                        trySend(
-                                            NavigationCue.InformationalAlert(
-                                                "$target detected",
-                                                false
-                                            )
+                            .map { it.first }
+                            .last()
+                            .let { fullResponse ->
+                                val affirmative = fullResponse.trim().lowercase().startsWith("y")
+                                if (affirmative) {
+                                    // Once confirmed, emit the detection cue and start streaming the location.
+                                    trySend(
+                                        NavigationCue.InformationalAlert(
+                                            "$target detected",
+                                            false
                                         )
+                                    )
 
-                                        // location description
-                                        gemmaDataSource.generateResponse(locationPrompt, bitmap)
-                                            .collect { (chunk, d) ->
-                                                if (chunk.isNotBlank())
-                                                    trySend(
-                                                        NavigationCue.InformationalAlert(
-                                                            chunk,
-                                                            d
-                                                        )
+                                    gemmaDataSource.generateResponse(locationPrompt, bitmap)
+                                        .collect { (chunk, done) ->
+                                            if (chunk.isNotBlank()) {
+                                                trySend(
+                                                    NavigationCue.InformationalAlert(
+                                                        chunk,
+                                                        done
                                                     )
-
-                                                if (d) this@callbackFlow.close()
+                                                )
                                             }
-                                    }
-                                    busy = false
+                                            if (done) {
+                                                this@callbackFlow.close()
+                                            }
+                                        }
                                 }
+                                // If not affirmative, the outer flow just continues, trying the next frame.
                             }
                     }
                 }
@@ -534,5 +529,33 @@ class LuminaRepositoryImpl @Inject constructor(
         } finally {
             objectDetectorDataSource.setPaused(false)
         }
+    }
+
+
+    override fun startCrossingMode() {
+        crossingJob?.cancel()
+        crossingJob = repositoryScope.launch {
+            pauseNavigation()
+
+            while (isActive) {
+                val frames = getMotionAnalysisFrames()
+                if (frames.isEmpty()) continue
+
+                val prompt =
+                    "You are in CROSSING MODE. Guide the user with WAIT, CROSS, or ADJUST LEFT/RIGHT in <=3 words.";
+
+                gemmaDataSource.generateResponse(prompt, frames)
+                    .collect { (chunk, done) ->
+                        if (chunk.isNotBlank())
+                            manualCueFlow.emit(NavigationCue.CriticalAlert(chunk, done))
+                    }
+            }
+        }
+    }
+
+    override fun stopCrossingMode() {
+        crossingJob?.cancel()
+        crossingJob = null
+        resumeNavigation()
     }
 }
