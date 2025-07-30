@@ -59,6 +59,14 @@ interface LuminaRepository {
     fun stopCrossingMode()
 
     /**
+     * Asks a specific question about the current scene.
+     *
+     * @param question The user's question.
+     * @return A flow of navigation cues containing the answer.
+     */
+    fun askQuestion(question: String): Flow<NavigationCue>
+
+    /**
      * Searches the live camera stream for a specific object.
      * The flow emits a single [NavigationCue] when the object is detected.
      *

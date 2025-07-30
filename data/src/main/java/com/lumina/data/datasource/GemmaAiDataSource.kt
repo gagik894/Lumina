@@ -65,6 +65,8 @@ class GemmaAiDataSource @Inject constructor(
     /** Maximum image dimension for processing to prevent OOM */
     private val maxImageDimension = 512
 
+    var finished = false
+
     private val _initializationState =
         MutableStateFlow<InitializationState>(InitializationState.NotInitialized)
     override val initializationState: StateFlow<InitializationState> =
@@ -145,6 +147,13 @@ class GemmaAiDataSource @Inject constructor(
             If asked to locate a specific object, describe its location (e.g., "keyboard centered near") in no more than 6 words.
 
             IMPORTANT: State your answer ONCE and then stop. Do not repeat or refine the sentence in subsequent tokens.
+
+            OPEN QUESTION MODE:
+            When the user asks a direct question, answer it concisely based on the image content. If the answer isn't in the image, state that clearly.
+
+            MOVEMENT ANALYSIS:
+            When given multiple images in sequence, analyze:
+            1. Object movement direction and speed
             """
 
         newSession.addQueryChunk(systemPrompt)
@@ -181,7 +190,7 @@ class GemmaAiDataSource @Inject constructor(
         generationMutex.lock()
         try {
             val currentSession = getOrCreateNavigationSession()
-
+            finished = false
             // Calculate timing information for motion context
             val timeSpanMs = if (frames.size > 1) {
                 frames.last().timestampMs - frames.first().timestampMs
@@ -207,6 +216,8 @@ class GemmaAiDataSource @Inject constructor(
             // Estimate tokens for images (conservative estimate)
             approximateTokenCount += frames.size * 200
 
+            var finished = false
+
             // Generate response asynchronously with streaming callback
             val startTime = System.currentTimeMillis()
             val uniqueChunks = mutableSetOf<String>()
@@ -224,6 +235,7 @@ class GemmaAiDataSource @Inject constructor(
                 val finalFlag = done || forcedDone
 
                 if (finalFlag) {
+                    finished = true
                     approximateTokenCount += estimateTokens(partialResult)
                 }
 
@@ -238,7 +250,9 @@ class GemmaAiDataSource @Inject constructor(
         }
 
         awaitClose {
-            // keep navigation session; no reset
+            if (!finished) {
+                resetSession()
+            }
             generationMutex.unlock()
         }
     }
@@ -266,6 +280,7 @@ class GemmaAiDataSource @Inject constructor(
                 }
 
                 val startTime = System.currentTimeMillis()
+                finished = false
                 val uniqueChunks = mutableSetOf<String>()
 
                 currentSession.generateResponseAsync { partialResult, done ->
@@ -280,6 +295,7 @@ class GemmaAiDataSource @Inject constructor(
                     val finalFlag = done || forcedDone
 
                     if (finalFlag) {
+                        finished = true
                         approximateTokenCount += estimateTokens(partialResult)
                     }
 
@@ -293,6 +309,9 @@ class GemmaAiDataSource @Inject constructor(
             }
 
             awaitClose {
+                if (!finished) {
+                    resetSession()
+                }
                 // keep navigation session
                 generationMutex.unlock()
             }

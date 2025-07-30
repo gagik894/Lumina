@@ -350,6 +350,28 @@ class LuminaRepositoryImpl @Inject constructor(
             .onCompletion { resumeNavigation() }
     }
 
+    override fun askQuestion(question: String): Flow<NavigationCue> = callbackFlow {
+        val latestFrame = synchronized(frameBuffer) {
+            frameBuffer.lastOrNull()?.bitmap
+        }
+
+        if (latestFrame == null) {
+            trySend(NavigationCue.InformationalAlert("Camera frame not available.", true))
+            close()
+            return@callbackFlow
+        }
+
+        val prompt = "Based on the image, answer the user's question: $question"
+        gemmaDataSource.generateResponse(prompt, latestFrame)
+            .onStart { pauseNavigation() }
+            .onCompletion { resumeNavigation() }
+            .collect { (chunk, done) ->
+                trySend(NavigationCue.InformationalAlert(chunk, done))
+                if (done) close()
+            }
+        awaitClose { }
+    }
+
     /**
      * Starts the Director Pipeline with intelligent decision tree and motion analysis.
      */

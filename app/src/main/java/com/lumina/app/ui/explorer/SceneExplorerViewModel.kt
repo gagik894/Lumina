@@ -89,6 +89,12 @@ class SceneExplorerViewModel @Inject constructor(
 
     private var findJob: Job? = null
 
+    /** Job for street crossing guidance */
+    private var crossingJob: Job? = null
+
+    /** Job for handling one-off questions */
+    private var questionJob: Job? = null
+
     init {
         initializeTextToSpeech()
     }
@@ -262,8 +268,18 @@ class SceneExplorerViewModel @Inject constructor(
                 speak("Crossing mode")
                 startCrossingMode()
             }
+            lower.startsWith("question") -> {
+                val question = lower.removePrefix("question").trim()
+                if (question.isNotEmpty()) {
+                    askQuestion(question)
+                } else {
+                    speak("What is your question?")
+                }
+            }
             else -> {
-                speak("Command not recognized")
+                val question = lower.trim()
+                askQuestion(question)
+//                speak("Command not recognized")
             }
         }
     }
@@ -272,6 +288,15 @@ class SceneExplorerViewModel @Inject constructor(
     fun stopFindMode() {
         findJob?.cancel()
         findJob = null
+    }
+
+    private fun askQuestion(question: String) {
+        questionJob?.cancel()
+        questionJob = viewModelScope.launch {
+            luminaRepository.askQuestion(question).collect { cue ->
+                manualCueFlow.emit(cue)
+            }
+        }
     }
 
     // Crossing mode wrappers
@@ -317,7 +342,9 @@ class SceneExplorerViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        questionJob?.cancel()
         findJob?.cancel()
+        crossingJob?.cancel()
         textToSpeechService.shutdown()
         luminaRepository.stopNavigation()
     }
