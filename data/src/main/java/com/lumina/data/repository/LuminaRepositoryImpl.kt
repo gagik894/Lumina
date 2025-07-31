@@ -42,13 +42,12 @@ private const val TAG = "LuminaRepositoryImpl"
  * only one major function (e.g., general navigation, finding an object) is active at any given time.
  * This prevents conflicting operations and resource contention.
  *
- * The primary long-running modes are:
+ * The primary long-running mode is:
  * - **NAVIGATION**: The default mode, providing continuous environmental awareness through the
  *   intelligent "Director Pattern".
- * - **CROSSING**: A specialized mode for providing street crossing guidance.
  *
- * Transient, user-initiated tasks like `findObject` or `askQuestion` will temporarily pause any
- * active long-running mode, execute exclusively, and then resume the previous mode upon completion.
+ * Transient, user-initiated tasks like `findObject`, `askQuestion`, or `startCrossingMode` will
+ * temporarily pause the NAVIGATION mode, execute exclusively, and then resume it upon completion.
  *
  * @param gemmaDataSource The AI data source responsible for generating scene descriptions.
  * @param objectDetectorDataSource The data source for detecting objects in camera frames.
@@ -65,19 +64,17 @@ class LuminaRepositoryImpl @Inject constructor(
         gemmaDataSource.initializationState
 
     /**
-     * Defines the exclusive, long-running operational modes of the repository.
-     * Only one of these modes can be active at a time.
+     * Defines the exclusive, long-running operational mode of the repository.
+     * NAVIGATION is the only long-running mode, which integrates the object detector.
      */
     private enum class OperatingMode {
-        NAVIGATION,
-        CROSSING,
-        DETECTOR
+        NAVIGATION
     }
 
     /** The currently active long-running mode. */
     private var activeMode: OperatingMode? = null
 
-    /** The mode that was paused by a transient operation (e.g., findObject). */
+    /** The mode that was paused by a transient operation. */
     private var pausedMode: OperatingMode? = null
 
     /** The [Job] associated with the currently active long-running mode. */
@@ -246,7 +243,7 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Pauses the currently active long-running mode (e.g., NAVIGATION, CROSSING) to allow
+     * Pauses the currently active long-running mode (e.g., NAVIGATION) to allow
      * a transient operation to run. The paused mode is recorded so it can be resumed later.
      */
     private fun pauseActiveMode() {
@@ -271,81 +268,47 @@ class LuminaRepositoryImpl @Inject constructor(
         Log.d(TAG, "Resuming paused mode: $pausedMode")
         when (pausedMode) {
             OperatingMode.NAVIGATION -> startDirectorPipeline()
-            OperatingMode.CROSSING -> startCrossingMode()
-            OperatingMode.DETECTOR -> startDetectorMode()
             null -> {
                 // If no mode was paused, default to starting the main navigation pipeline.
+                Log.d(TAG, "No paused mode found, starting default navigation pipeline.")
                 startDirectorPipeline()
             }
         }
         pausedMode = null
     }
 
-    private fun startDetectorMode() {
-        if (activeMode == OperatingMode.DETECTOR) return
-        Log.d(TAG, "Starting DETECTOR mode")
-
-        activeJob?.cancel()
-        activeMode = OperatingMode.DETECTOR
-        activeJob = repositoryScope.launch {
-            objectDetectorDataSource.getDetectionStream(frameFlow)
-                .collectLatest { detectedObjects ->
-                    if (!isActive) return@collectLatest
-
-                    Log.i(TAG, "Detected objects: $detectedObjects")
-                    val currentTime = System.currentTimeMillis()
-                    val currentObjectLabels = detectedObjects.toSet()
-
-                    if (checkCriticalThreats(detectedObjects, currentTime)) {
-                        navigationCueFlow.tryEmit(
-                            NavigationCue.CriticalAlert(
-                                "Critical threat detected!",
-                                true
-                            )
-                        )
-                        lastSeenObjects = currentObjectLabels
-                        return@collectLatest
-                    }
-
-                    val newImportantObjects = findNewImportantObjects(currentObjectLabels)
-                    if (newImportantObjects.isNotEmpty() && (currentTime - lastInformationalAlertTime) > 5000) {
-                        navigationCueFlow.tryEmit(
-                            NavigationCue.InformationalAlert(
-                                "New object: ${newImportantObjects.first()}",
-                                true
-                            )
-                        )
-                        lastInformationalAlertTime = currentTime
-                        lastSeenObjects = currentObjectLabels
-                        return@collectLatest
-                    }
-
-                    lastSeenObjects = currentObjectLabels
-                }
-        }
-    }
-
+    /**
+     * CORRECTED: This now correctly pauses navigation and runs as an exclusive transient operation.
+     */
     override fun describeScene(
         image: ImageInput,
         prompt: String
     ): Flow<NavigationCue> {
-        // Converts the encoded image bytes to a Bitmap required by GemmaAI.
-        val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+        val flow = callbackFlow {
+            transientOperationMutex.withLock {
+                if (!isActive) return@withLock
 
-        /*
-         * Uses GemmaAiDataSource’s single-image pipeline to obtain a detailed
-         * description.  The response stream is mapped to an InformationalAlert so
-         * it can be consumed by the UI and TTS layers without special-case logic.
-         */
-        return gemmaDataSource.generateResponse(prompt, bitmap)
-            .map { (partialResult, done) ->
-                NavigationCue.InformationalAlert(partialResult, done)
+                val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+
+                try {
+                    generateSerializedResponse(prompt, bitmap)
+                        .collect { (chunk, done) ->
+                            trySend(NavigationCue.InformationalAlert(chunk, done))
+                            if (done) close()
+                        }
+                } finally {
+                    // Ensure bitmap is recycled even on error or cancellation
+                    bitmap.recycle()
+                }
             }
-            .onCompletion {
-                // Releases native memory once streaming completes.
-                bitmap.recycle()
-            }
+            awaitClose { }
+        }
+
+        return flow
+            .onStart { pauseActiveMode() }
+            .onCompletion { resumePausedMode() }
     }
+
 
     override fun findObject(target: String): Flow<NavigationCue> {
         val normalizedTarget = target.trim().lowercase()
@@ -462,11 +425,6 @@ class LuminaRepositoryImpl @Inject constructor(
             .onCompletion { resumePausedMode() }
     }
 
-    /**
-     * Starts the Director Pipeline, the primary navigation mode.
-     * This mode is responsible for providing continuous environmental awareness.
-     * If another mode is active, it will be cancelled.
-     */
     private fun startDirectorPipeline() {
         if (activeMode == OperatingMode.NAVIGATION) return // Already in this mode
         Log.d(TAG, "Starting Director Pipeline (NAVIGATION mode)")
@@ -483,14 +441,12 @@ class LuminaRepositoryImpl @Inject constructor(
                     val currentObjectLabels = detectedObjects.toSet()
                     val motionFrames = getMotionAnalysisFrames()
 
-                    // Rule 1: Check for CRITICAL threats with motion analysis
                     if (checkCriticalThreats(detectedObjects, currentTime)) {
                         if (motionFrames.isNotEmpty()) triggerCriticalAlert(motionFrames)
                         lastSeenObjects = currentObjectLabels
                         return@collectLatest
                     }
 
-                    // Rule 2: Check for IMPORTANT new objects with movement context
                     val newImportantObjects = findNewImportantObjects(currentObjectLabels)
                     if (newImportantObjects.isNotEmpty() && (currentTime - lastInformationalAlertTime) > 5000) {
                         if (motionFrames.isNotEmpty()) triggerInformationalAlert(
@@ -502,19 +458,13 @@ class LuminaRepositoryImpl @Inject constructor(
                         return@collectLatest
                     }
 
-                    // Rule 4: STABLE state - do nothing, just update tracking
                     lastSeenObjects = currentObjectLabels
                 }
         }
     }
 
-    /**
-     * Updates the frame buffer with new timestamped frames.
-     * This method is synchronized to ensure thread-safe access to the buffer.
-     */
     private fun updateFrameBuffer(bitmap: Bitmap, timestamp: Long) {
         synchronized(frameBuffer) {
-            // Add the new frame and remove the oldest if the buffer exceeds its capacity.
             frameBuffer.add(TimestampedFrame(bitmap, timestamp))
             if (frameBuffer.size > 35) {
                 frameBuffer.removeFirst()
@@ -522,19 +472,12 @@ class LuminaRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * Gets a list of frames suitable for motion analysis.
-     * This method is synchronized to ensure thread-safe access to the buffer.
-     */
     private fun getMotionAnalysisFrames(): List<TimestampedFrame> {
         synchronized(frameBuffer) {
             return FrameSelector.selectMotionFrames(frameBuffer.toList())
         }
     }
 
-    /**
-     * Rule 1: Checks for critical threats requiring immediate attention.
-     */
     private fun checkCriticalThreats(detectedObjects: List<String>, currentTime: Long): Boolean {
         val criticalObjectsPresent = detectedObjects.any { it in criticalObjects }
 
@@ -546,17 +489,11 @@ class LuminaRepositoryImpl @Inject constructor(
         return false
     }
 
-    /**
-     * Rule 2: Finds new important objects that warrant informational alerts.
-     */
     private fun findNewImportantObjects(currentObjects: Set<String>): List<String> {
         val newObjects = currentObjects - lastSeenObjects
         return newObjects.filter { it in importantObjects }
     }
 
-    /**
-     * Triggers a critical alert with motion analysis for immediate threats.
-     */
     private suspend fun triggerCriticalAlert(frames: List<TimestampedFrame>) {
         val prompt = "IMMEDIATE OBSTACLE. NAME IT IN 3 WORDS."
         Log.i(TAG, "triggerCriticalAlert: ")
@@ -572,9 +509,6 @@ class LuminaRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * Triggers an informational alert with movement context for new important objects.
-     */
     private suspend fun triggerInformationalAlert(
         frames: List<TimestampedFrame>,
         newObjects: List<String>
@@ -601,9 +535,6 @@ class LuminaRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * Triggers an ambient update with scene change detection.
-     */
     private suspend fun triggerAmbientUpdate(frames: List<TimestampedFrame>) {
         val prompt = "Briefly describe the general surroundings for a blind user."
         Log.i(TAG, "triggerAmbientUpdate: ")
@@ -620,45 +551,56 @@ class LuminaRepositoryImpl @Inject constructor(
 
     }
 
-    override fun startCrossingMode() {
-        if (activeMode == OperatingMode.CROSSING) return
-        Log.d(TAG, "Starting CROSSING mode")
+    override fun startCrossingMode(): Flow<NavigationCue> {
+        val flow = callbackFlow {
+            transientOperationMutex.withLock {
+                if (!isActive) return@withLock
 
-        activeJob?.cancel()
-        activeMode = OperatingMode.CROSSING
-        activeJob = repositoryScope.launch {
-            frameFlow.collectLatest { // Use collectLatest to process only the newest frame
-                val frames = getMotionAnalysisFrames()
-                if (frames.isEmpty()) return@collectLatest
+                Log.d(TAG, "Starting transient CROSSING operation")
+                val crossingJob = repositoryScope.launch {
+                    frameFlow.collectLatest {
+                        val frames = getMotionAnalysisFrames()
+                        if (frames.isEmpty()) return@collectLatest
 
-                val prompt =
-                    "You are in CROSSING MODE. Guide the user with WAIT, CROSS, or ADJUST LEFT/RIGHT in <=3 words.";
+                        val prompt = """
+                        You are in CROSSING MODE. Guide the user with WAIT, CROSS, or ADJUST LEFT/RIGHT in <=3 words.
+                        IMPORTANT: Once you determine the user has safely crossed the street, you MUST respond with the exact phrase 'CROSSING COMPLETE' and nothing else.
+                        """.trimIndent()
 
-                generateSerializedResponse(prompt, frames)
-                    .collect { (chunk, done) ->
-                        if (chunk.isNotBlank())
-                            navigationCueFlow.emit(NavigationCue.CriticalAlert(chunk, done))
+                        try {
+                            generateSerializedResponse(prompt, frames)
+                                .collect { (chunk, done) ->
+                                    if (chunk.contains("CROSSING COMPLETE", ignoreCase = true)) {
+                                        Log.i(TAG, "Crossing complete signal received from AI.")
+                                        trySend(
+                                            NavigationCue.InformationalAlert(
+                                                "Crossing complete.",
+                                                true
+                                            )
+                                        )
+                                        this@callbackFlow.close() // Close the flow to stop the operation.
+                                    } else if (chunk.isNotBlank()) {
+                                        trySend(NavigationCue.CriticalAlert(chunk, done))
+                                    }
+                                }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error during crossing guidance", e)
+                            this@callbackFlow.close(e)
+                        }
                     }
+                }
+                awaitClose {
+                    Log.d(TAG, "Closing transient CROSSING operation.")
+                    crossingJob.cancel()
+                }
             }
         }
+
+        return flow
+            .onStart { pauseActiveMode() }
+            .onCompletion { resumePausedMode() }
     }
 
-    override fun stopCrossingMode() {
-        if (activeMode == OperatingMode.CROSSING) {
-            activeJob?.cancel()
-            activeJob = null
-            activeMode = null
-        }
-        // As per original logic, default back to navigation mode.
-        Log.d(TAG, "Stopping CROSSING mode, returning to NAVIGATION")
-        startDirectorPipeline()
-    }
-
-    /**
-     * A wrapper around the AI data source's `generateResponse` function that ensures all calls
-     * are serialized via the `aiMutex`. This prevents concurrency issues with the underlying
-     * AI library.
-     */
     private suspend fun generateSerializedResponse(
         prompt: String,
         frames: List<TimestampedFrame>
@@ -676,5 +618,4 @@ class LuminaRepositoryImpl @Inject constructor(
             gemmaDataSource.generateResponse(prompt, bitmap)
         }
     }
-
 }

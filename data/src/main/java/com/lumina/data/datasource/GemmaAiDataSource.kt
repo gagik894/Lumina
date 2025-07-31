@@ -187,7 +187,11 @@ class GemmaAiDataSource @Inject constructor(
         prompt: String,
         frames: List<TimestampedFrame>
     ): Flow<Pair<String, Boolean>> = callbackFlow {
-        generationMutex.lock()
+        if (!generationMutex.tryLock()) {
+            Log.w(TAG, "Concurrent call to generateResponse detected, ignoring.")
+            channel.close()
+            return@callbackFlow
+        }
         try {
             val currentSession = getOrCreateNavigationSession()
             finished = false
@@ -262,7 +266,11 @@ class GemmaAiDataSource @Inject constructor(
      */
     override fun generateResponse(prompt: String, image: Bitmap): Flow<Pair<String, Boolean>> =
         callbackFlow {
-            generationMutex.lock()
+            if (!generationMutex.tryLock()) {
+                Log.w(TAG, "Concurrent call to generateResponse detected, ignoring.")
+                channel.close()
+                return@callbackFlow
+            }
             try {
                 val currentSession = getOrCreateNavigationSession()
 
@@ -362,18 +370,27 @@ class GemmaAiDataSource @Inject constructor(
     }
 
     override fun resetSession() {
-        try {
-            navigationSession?.close()
-        } catch (e: IllegalStateException) {
-            Log.w(TAG, "Failed to close session cleanly, may be busy.", e)
+        if (generationMutex.tryLock()) {
+            try {
+                navigationSession?.close()
+                navigationSession = null
+                approximateTokenCount = 0
+                Log.d(TAG, "Session reset")
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Failed to close session cleanly, may be busy.", e)
+            } finally {
+                generationMutex.unlock()
+            }
+        } else {
+            Log.w(TAG, "Reset session called while generation in progress. Ignoring.")
         }
-        navigationSession = null
-        approximateTokenCount = 0
-        Log.d(TAG, "Session reset")
     }
 
     override fun close() {
         try {
+            if (generationMutex.isLocked) {
+                generationMutex.unlock()
+            }
             navigationSession?.close()
             llmInference?.close()
             Log.d(TAG, "Resources closed")

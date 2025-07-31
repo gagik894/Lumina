@@ -88,11 +88,7 @@ class SceneExplorerViewModel @Inject constructor(
     private val manualCueFlow = MutableSharedFlow<NavigationCue>()
 
     private var findJob: Job? = null
-
-    /** Job for street crossing guidance */
     private var crossingJob: Job? = null
-
-    /** Job for handling one-off questions */
     private var questionJob: Job? = null
 
     init {
@@ -234,7 +230,27 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
-     * Starts an object-finding session.  The session completes automatically
+     * Starts a street crossing session.
+     * The session completes automatically when the AI determines the crossing is finished.
+     */
+    private fun startCrossingMode() {
+        crossingJob?.cancel()
+        crossingJob = viewModelScope.launch(Dispatchers.IO) {
+            luminaRepository.startCrossingMode()
+                .collect { cue -> manualCueFlow.emit(cue) }
+        }
+    }
+
+    /**
+     * Manually stops an active crossing session, if any.
+     */
+    private fun stopCrossingMode() {
+        crossingJob?.cancel()
+        crossingJob = null
+    }
+
+    /**
+     * Starts an object-finding session. The session completes automatically
      * when the requested object is detected.
      */
     fun startFindMode(target: String) {
@@ -243,6 +259,12 @@ class SceneExplorerViewModel @Inject constructor(
             luminaRepository.findObject(target)
                 .collect { cue -> manualCueFlow.emit(cue) }
         }
+    }
+
+    /** Stops an active find session, if any. */
+    fun stopFindMode() {
+        findJob?.cancel()
+        findJob = null
     }
 
     /** Entry point from voice commands. */
@@ -261,11 +283,11 @@ class SceneExplorerViewModel @Inject constructor(
             lower == "cancel" || lower == "stop" -> {
                 stopFindMode()
                 stopCrossingMode()
-                speak("Search cancelled")
+                speak("Operation cancelled")
             }
 
             lower == "cross street" -> {
-                speak("Crossing mode")
+                speak("Starting crossing mode. Please wait for instructions.")
                 startCrossingMode()
             }
             lower.startsWith("question") -> {
@@ -279,15 +301,8 @@ class SceneExplorerViewModel @Inject constructor(
             else -> {
                 val question = lower.trim()
                 askQuestion(question)
-//                speak("Command not recognized")
             }
         }
-    }
-
-    /** Stops an active find session, if any. */
-    fun stopFindMode() {
-        findJob?.cancel()
-        findJob = null
     }
 
     private fun askQuestion(question: String) {
@@ -298,10 +313,6 @@ class SceneExplorerViewModel @Inject constructor(
             }
         }
     }
-
-    // Crossing mode wrappers
-    private fun startCrossingMode() = luminaRepository.startCrossingMode()
-    private fun stopCrossingMode() = luminaRepository.stopCrossingMode()
 
     /**
      * Manually triggers speech for the current description.
