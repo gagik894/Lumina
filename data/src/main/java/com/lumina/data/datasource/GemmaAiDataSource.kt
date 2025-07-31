@@ -362,7 +362,11 @@ class GemmaAiDataSource @Inject constructor(
     }
 
     override fun resetSession() {
-        navigationSession?.close()
+        try {
+            navigationSession?.close()
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Failed to close session cleanly, may be busy.", e)
+        }
         navigationSession = null
         approximateTokenCount = 0
         Log.d(TAG, "Session reset")
