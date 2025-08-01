@@ -1,6 +1,7 @@
 package com.lumina.data.repository
 
 import android.util.Log
+import com.lumina.domain.service.NavigationModeService
 import kotlinx.coroutines.Job
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,7 +17,7 @@ private const val TAG = "NavigationModeManager"
  */
 @Singleton
 class NavigationModeManager @Inject constructor(
-    private val navigationModeService: com.lumina.domain.service.NavigationModeService
+    private val navigationModeService: NavigationModeService
 ) {
 
     /** The coroutine job associated with the currently active long-running mode */
@@ -28,9 +29,8 @@ class NavigationModeManager @Inject constructor(
      * @param mode The mode to check
      * @return true if the specified mode is currently active
      */
-    fun isActive(mode: OperatingMode): Boolean {
-        val domainMode = mode.toDomainMode()
-        return navigationModeService.isActive(domainMode) && activeJob?.isActive == true
+    fun isActive(mode: NavigationModeService.OperatingMode): Boolean {
+        return navigationModeService.isActive(mode) && activeJob?.isActive == true
     }
 
     /**
@@ -51,15 +51,14 @@ class NavigationModeManager @Inject constructor(
      * @param mode The mode to start
      * @param job The coroutine job that implements the mode's logic
      */
-    fun startMode(mode: OperatingMode, job: Job) {
+    fun startMode(mode: NavigationModeService.OperatingMode, job: Job) {
         // Cancel any existing active mode
         if (activeJob?.isActive == true) {
             Log.d(TAG, "Cancelling active mode to start new mode: $mode")
             activeJob?.cancel()
         }
 
-        val domainMode = mode.toDomainMode()
-        navigationModeService.startMode(domainMode)
+        navigationModeService.startMode(mode)
         activeJob = job
 
         Log.d(TAG, "Started mode: $mode")
@@ -92,8 +91,8 @@ class NavigationModeManager @Inject constructor(
      *
      * @return The paused mode, or null if no mode was paused
      */
-    fun getPausedMode(): OperatingMode? {
-        return navigationModeService.getPausedMode()?.toDataMode()
+    fun getPausedMode(): NavigationModeService.OperatingMode? {
+        return navigationModeService.getPausedMode()
     }
 
     /**
@@ -124,35 +123,11 @@ class NavigationModeManager @Inject constructor(
      *
      * @return The active mode, or null if no mode is active
      */
-    fun getActiveMode(): OperatingMode? {
+    fun getActiveMode(): NavigationModeService.OperatingMode? {
         return if (activeJob?.isActive == true) {
-            navigationModeService.getActiveMode()?.toDataMode()
+            navigationModeService.getActiveMode()
         } else {
             null
         }
-    }
-
-    /**
-     * Defines the exclusive, long-running operational modes of the repository.
-     * Currently only NAVIGATION is supported as the primary continuous mode.
-     */
-    enum class OperatingMode {
-        /**
-         * The main navigation mode that provides continuous environmental awareness
-         * through object detection and AI-powered scene analysis.
-         */
-        NAVIGATION;
-
-        fun toDomainMode(): com.lumina.domain.service.NavigationModeService.OperatingMode {
-            return when (this) {
-                NAVIGATION -> com.lumina.domain.service.NavigationModeService.OperatingMode.NAVIGATION
-            }
-        }
-    }
-}
-
-private fun com.lumina.domain.service.NavigationModeService.OperatingMode.toDataMode(): NavigationModeManager.OperatingMode {
-    return when (this) {
-        com.lumina.domain.service.NavigationModeService.OperatingMode.NAVIGATION -> NavigationModeManager.OperatingMode.NAVIGATION
     }
 }

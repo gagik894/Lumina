@@ -105,4 +105,31 @@ class PromptGenerator @Inject constructor(
     ): String {
         return promptGenerationService.generateContextualNavigationPrompt(context, additionalInfo)
     }
+
+    /**
+     * Generates a prompt for currency identification.
+     *
+     * @return Prompt optimized for currency recognition and value identification
+     */
+    fun generateCurrencyIdentificationPrompt(): String {
+        return promptGenerationService.generateCurrencyIdentificationPrompt()
+    }
+
+    /**
+     * Generates a prompt for receipt and document reading.
+     *
+     * @return Prompt designed for comprehensive document text extraction
+     */
+    fun generateReceiptReadingPrompt(): String {
+        return promptGenerationService.generateReceiptReadingPrompt()
+    }
+
+    /**
+     * Generates a prompt for general text reading from images.
+     *
+     * @return Prompt for general text extraction and reading
+     */
+    fun generateTextReadingPrompt(): String {
+        return promptGenerationService.generateTextReadingPrompt()
+    }
 }

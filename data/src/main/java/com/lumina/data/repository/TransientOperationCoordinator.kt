@@ -1,6 +1,7 @@
 package com.lumina.data.repository
 
 import android.util.Log
+import com.lumina.domain.service.NavigationModeService
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -98,7 +99,7 @@ class TransientOperationCoordinator @Inject constructor(
         val pausedMode = navigationModeManager.getPausedMode()
 
         when (pausedMode) {
-            NavigationModeManager.OperatingMode.NAVIGATION -> {
+            NavigationModeService.OperatingMode.NAVIGATION -> {
                 Log.d(TAG, "Resuming navigation mode after transient operation")
                 // The actual mode resumption will be handled by the repository
                 // This coordinator just manages the lifecycle

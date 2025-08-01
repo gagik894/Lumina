@@ -78,4 +78,28 @@ interface LuminaRepository {
      * @return A flow of [NavigationCue] that emits updates on the search and location.
      */
     fun findObject(target: String): Flow<NavigationCue>
+
+    /**
+     * Identifies currency (bills/coins) from the provided image. This is a one-shot operation.
+     *
+     * @param image The image containing currency to identify.
+     * @return A flow of navigation cues containing currency identification details.
+     */
+    fun identifyCurrency(image: ImageInput): Flow<NavigationCue>
+
+    /**
+     * Reads receipt or document text from the provided image. This is a one-shot operation.
+     *
+     * @param image The image containing the receipt or document to read.
+     * @return A flow of navigation cues containing the organized text content.
+     */
+    fun readReceipt(image: ImageInput): Flow<NavigationCue>
+
+    /**
+     * Reads any visible text from the provided image. This is a one-shot operation.
+     *
+     * @param image The image containing text to read.
+     * @return A flow of navigation cues containing the extracted text.
+     */
+    fun readText(image: ImageInput): Flow<NavigationCue>
 }

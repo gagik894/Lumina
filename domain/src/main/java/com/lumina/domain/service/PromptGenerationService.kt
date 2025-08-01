@@ -67,10 +67,8 @@ class PromptGenerationService @Inject constructor() {
      * @return Prompt for crossing guidance with termination instructions
      */
     fun generateCrossingGuidancePrompt(): String {
-        return """
-            You are in CROSSING MODE. Guide the user with WAIT, CROSS, or ADJUST LEFT/RIGHT in <=3 words.
-            IMPORTANT: Once you determine the user has safely crossed the street, you MUST respond with the exact phrase 'CROSSING COMPLETE' and nothing else.
-        """.trimIndent()
+        return "You are in CROSSING MODE. Guide the user with WAIT, CROSS, or ADJUST LEFT/RIGHT in <=3 words. " +
+                "IMPORTANT: Once you determine the user has safely crossed the street, you MUST respond with the exact phrase 'CROSSING COMPLETE' and nothing else."
     }
 
     /**
@@ -145,5 +143,46 @@ class PromptGenerationService @Inject constructor() {
             "rural" -> "Describe rural path conditions and landmarks for a blind user.$additionalInfo"
             else -> "Describe the navigation environment for a blind user.$additionalInfo"
         }
+    }
+
+    /**
+     * Generates a prompt for currency identification.
+     *
+     * This prompt is specifically designed for identifying money bills, coins,
+     * and providing denomination information to visually impaired users.
+     *
+     * @return Prompt optimized for currency recognition and value identification
+     */
+    fun generateCurrencyIdentificationPrompt(): String {
+        return "Identify the currency in this image. State the exact denomination and currency, for example, '10 US Dollars' or '5 Euro'. " +
+                "Be precise and clear"
+    }
+
+    /**
+     * Generates a prompt for receipt and document reading.
+     *
+     * This prompt is optimized for reading receipts, bills, and other text documents,
+     * extracting the most relevant information for the user.
+     *
+     * @return Prompt designed for comprehensive document text extraction
+     */
+    fun generateReceiptReadingPrompt(): String {
+        return "Read only the important information from this receipt or document aloud. Start with the business name and date if visible. " +
+                "List the main items and their prices, the total amount, and payment method if shown. Do not read the receipt number, bar code, or other irrelevant details. " +
+                "Be organized and speak clearly."
+    }
+
+    /**
+     * Generates a prompt for general text reading from images.
+     *
+     * This prompt handles any text content in images, from signs to labels,
+     * providing clear and structured reading for visually impaired users.
+     *
+     * @return Prompt for general text extraction and reading
+     */
+    fun generateTextReadingPrompt(): String {
+        return "Read all visible text in this image clearly and systematically. " +
+                "Start with the largest or most prominent text, then continue with smaller details. " +
+                "Organize the information logically"
     }
 }

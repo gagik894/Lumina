@@ -10,6 +10,7 @@ import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.repository.LuminaRepository
+import com.lumina.domain.service.NavigationModeService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -256,7 +257,7 @@ class LuminaRepositoryImpl @Inject constructor(
      * navigation experience that adapts to environmental changes and threat levels.
      */
     private fun startDirectorPipeline() {
-        if (navigationModeManager.isActive(NavigationModeManager.OperatingMode.NAVIGATION)) {
+        if (navigationModeManager.isActive(NavigationModeService.OperatingMode.NAVIGATION)) {
             return // Already running
         }
 
@@ -318,7 +319,7 @@ class LuminaRepositoryImpl @Inject constructor(
         }
 
         navigationModeManager.startMode(
-            NavigationModeManager.OperatingMode.NAVIGATION,
+            NavigationModeService.OperatingMode.NAVIGATION,
             navigationJob
         )
     }
@@ -612,7 +613,7 @@ class LuminaRepositoryImpl @Inject constructor(
         val pausedMode = navigationModeManager.getPausedMode()
 
         when (pausedMode) {
-            NavigationModeManager.OperatingMode.NAVIGATION -> {
+            NavigationModeService.OperatingMode.NAVIGATION -> {
                 startDirectorPipeline()
             }
 
@@ -691,6 +692,132 @@ class LuminaRepositoryImpl @Inject constructor(
                 Log.e(TAG, "AI operation failed", e)
                 isAiOperationInProgress = false
                 throw e
+            }
+        }
+    }
+
+    override fun identifyCurrency(image: ImageInput): Flow<NavigationCue> {
+        return callbackFlow<NavigationCue> {
+            // Pause navigation first to prevent AI conflicts
+            pauseNavigation()
+
+            try {
+                transientOperationCoordinator.executeTransientOperation("identify_currency") {
+                    if (!isActive) return@executeTransientOperation
+
+                    val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                    val prompt = promptGenerator.generateCurrencyIdentificationPrompt()
+
+                    try {
+                        generateSerializedResponse(prompt, bitmap)
+                            .collect { (chunk, done) ->
+                                trySend(NavigationCue.InformationalAlert(chunk, done))
+                                if (done) close()
+                            }
+                    } finally {
+                        // Ensure bitmap is recycled even on error or cancellation
+                        bitmap.recycle()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Currency identification failed", e)
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to identify currency. Please try again.",
+                        true
+                    )
+                )
+                close()
+            } finally {
+                resumeNavigation()
+            }
+
+            awaitClose {
+                resumeNavigation()
+            }
+        }
+    }
+
+    override fun readReceipt(image: ImageInput): Flow<NavigationCue> {
+        return callbackFlow<NavigationCue> {
+            // Pause navigation first to prevent AI conflicts
+            pauseNavigation()
+
+            try {
+                transientOperationCoordinator.executeTransientOperation("read_receipt") {
+                    if (!isActive) return@executeTransientOperation
+
+                    val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                    val prompt = promptGenerator.generateReceiptReadingPrompt()
+
+                    try {
+                        generateSerializedResponse(prompt, bitmap)
+                            .collect { (chunk, done) ->
+                                trySend(NavigationCue.InformationalAlert(chunk, done))
+                                if (done) close()
+                            }
+                    } finally {
+                        // Ensure bitmap is recycled even on error or cancellation
+                        bitmap.recycle()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Receipt reading failed", e)
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to read receipt. Please try again.",
+                        true
+                    )
+                )
+                close()
+            } finally {
+                resumeNavigation()
+            }
+
+            awaitClose {
+                resumeNavigation()
+            }
+        }
+    }
+
+    override fun readText(image: ImageInput): Flow<NavigationCue> {
+        return callbackFlow<NavigationCue> {
+            // Pause navigation first to prevent AI conflicts
+            pauseNavigation()
+
+            try {
+                transientOperationCoordinator.executeTransientOperation("read_text") {
+                    if (!isActive) return@executeTransientOperation
+
+                    val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                    val prompt = promptGenerator.generateTextReadingPrompt()
+
+                    try {
+                        generateSerializedResponse(prompt, bitmap)
+                            .collect { (chunk, done) ->
+                                trySend(NavigationCue.InformationalAlert(chunk, done))
+                                if (done) close()
+                            }
+                    } finally {
+                        // Ensure bitmap is recycled even on error or cancellation
+                        bitmap.recycle()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Text reading failed", e)
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to read text. Please try again.",
+                        true
+                    )
+                )
+                close()
+            } finally {
+                resumeNavigation()
+            }
+
+            awaitClose {
+                resumeNavigation()
             }
         }
     }

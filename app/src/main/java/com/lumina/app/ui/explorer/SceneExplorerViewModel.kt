@@ -12,7 +12,10 @@ import com.lumina.domain.usecase.DescribeSceneUseCase
 import com.lumina.domain.usecase.FindObjectUseCase
 import com.lumina.domain.usecase.GetInitializationStateUseCase
 import com.lumina.domain.usecase.GetNavigationCuesUseCase
+import com.lumina.domain.usecase.IdentifyCurrencyUseCase
 import com.lumina.domain.usecase.ProcessFrameUseCase
+import com.lumina.domain.usecase.ReadReceiptUseCase
+import com.lumina.domain.usecase.ReadTextUseCase
 import com.lumina.domain.usecase.StartCrossingModeUseCase
 import com.lumina.domain.usecase.StopNavigationUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -67,6 +70,9 @@ enum class NavigationCueType {
  * @param findObject Use case for finding objects
  * @param askQuestionUseCase Use case for asking questions
  * @param stopNavigation Use case for stopping navigation
+ * @param identifyCurrency Use case for identifying currency
+ * @param readReceipt Use case for reading receipts
+ * @param readText Use case for reading general text
  * @param textToSpeechService Service for converting navigation cues to speech
  */
 @HiltViewModel
@@ -79,6 +85,9 @@ class SceneExplorerViewModel @Inject constructor(
     private val findObject: FindObjectUseCase,
     private val askQuestionUseCase: AskQuestionUseCase,
     private val stopNavigation: StopNavigationUseCase,
+    private val identifyCurrency: IdentifyCurrencyUseCase,
+    private val readReceipt: ReadReceiptUseCase,
+    private val readText: ReadTextUseCase,
     private val textToSpeechService: TextToSpeechService
 ) : ViewModel() {
 
@@ -296,6 +305,22 @@ class SceneExplorerViewModel @Inject constructor(
                 speak("Starting crossing mode. Please wait for instructions.")
                 startCrossingMode()
             }
+
+            lower == "read money" || lower == "identify currency" -> {
+                speak("Identifying currency")
+                identifyCurrencyFromFrame()
+            }
+
+            lower == "read receipt" -> {
+                speak("Reading receipt")
+                readReceiptFromFrame()
+            }
+
+            lower == "read text" -> {
+                speak("Reading text")
+                readTextFromFrame()
+            }
+
             lower.startsWith("question") -> {
                 val question = lower.removePrefix("question").trim()
                 if (question.isNotEmpty()) {
@@ -356,6 +381,54 @@ class SceneExplorerViewModel @Inject constructor(
 
     /** Returns true if TTS is currently speaking. */
     fun isSpeaking(): Boolean = textToSpeechService.isSpeaking()
+
+    /**
+     * Identifies currency from the current camera frame.
+     * Uses the most recent captured frame for analysis.
+     */
+    fun identifyCurrencyFromFrame() {
+        lastFrameBytes?.let { frameBytes ->
+            viewModelScope.launch(Dispatchers.IO) {
+                val imageInput = ImageInput(frameBytes)
+                identifyCurrency(imageInput)
+                    .collect { cue -> manualCueFlow.emit(cue) }
+            }
+        } ?: run {
+            speak("No image available. Please point camera at currency and try again.")
+        }
+    }
+
+    /**
+     * Reads receipt or document from the current camera frame.
+     * Uses the most recent captured frame for analysis.
+     */
+    fun readReceiptFromFrame() {
+        lastFrameBytes?.let { frameBytes ->
+            viewModelScope.launch(Dispatchers.IO) {
+                val imageInput = ImageInput(frameBytes)
+                readReceipt(imageInput)
+                    .collect { cue -> manualCueFlow.emit(cue) }
+            }
+        } ?: run {
+            speak("No image available. Please point camera at receipt and try again.")
+        }
+    }
+
+    /**
+     * Reads any text from the current camera frame.
+     * Uses the most recent captured frame for analysis.
+     */
+    fun readTextFromFrame() {
+        lastFrameBytes?.let { frameBytes ->
+            viewModelScope.launch(Dispatchers.IO) {
+                val imageInput = ImageInput(frameBytes)
+                readText(imageInput)
+                    .collect { cue -> manualCueFlow.emit(cue) }
+            }
+        } ?: run {
+            speak("No image available. Please point camera at text and try again.")
+        }
+    }
 
     override fun onCleared() {
         super.onCleared()
