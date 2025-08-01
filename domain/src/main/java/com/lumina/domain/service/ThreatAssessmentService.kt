@@ -4,7 +4,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Domain service responsible for analyzing detected objects and determining threat levels and alerting strategies.
+ * Domain service for analyzing detected objects and determining threat levels and alerting strategies.
  *
  * This service implements the core decision-making logic for the Lumina navigation system,
  * determining when and what type of alerts should be triggered based on:
@@ -16,9 +16,6 @@ import javax.inject.Singleton
  * 1. Critical threats (immediate danger) - highest priority
  * 2. New important objects - medium priority
  * 3. Ambient updates - lowest priority
- *
- * This is pure business logic with no external dependencies, making it easily testable
- * and independent of Android-specific implementations.
  */
 @Singleton
 class ThreatAssessmentService @Inject constructor() {

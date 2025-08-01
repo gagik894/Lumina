@@ -4,17 +4,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Domain service for generating contextually appropriate AI prompts for different navigation scenarios.
+ * Domain service for generating contextually appropriate AI prompts for navigation scenarios.
  *
  * This service centralizes all prompt generation logic, ensuring consistent and
  * optimized prompts for various use cases. Each prompt is carefully crafted to:
  * - Minimize token usage while maximizing information quality
  * - Provide clear, actionable guidance for visually impaired users
  * - Maintain consistent tone and terminology across the application
- *
- * The prompts are categorized by use case and optimized for the underlying AI model's
- * capabilities and response patterns. This is pure business logic with no external
- * dependencies, making it easily testable and reusable.
  */
 @Singleton
 class PromptGenerationService @Inject constructor() {

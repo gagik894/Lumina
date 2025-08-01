@@ -8,9 +8,7 @@ import javax.inject.Singleton
  * Data layer adapter for PromptGenerationService.
  *
  * This adapter wraps the pure domain PromptGenerationService and provides
- * the same interface for the data layer. Currently, this is a simple delegation
- * but could be extended with data layer specific concerns like caching,
- * localization, or prompt customization based on user preferences.
+ * the same interface for the data layer.
  */
 @Singleton
 class PromptGenerator @Inject constructor(

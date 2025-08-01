@@ -8,11 +8,10 @@ import javax.inject.Singleton
 private const val TAG = "ThreatAssessmentManager"
 
 /**
- * Data layer adapter for ThreatAssessmentService that adds logging and data layer concerns.
+ * Data layer adapter for ThreatAssessmentService with logging capabilities.
  *
- * This adapter wraps the pure domain ThreatAssessmentService with data layer concerns
- * like Android logging. It maintains the clean separation between business logic (domain)
- * and implementation details (data).
+ * This adapter wraps the domain ThreatAssessmentService and adds
+ * Android-specific logging for debugging and monitoring.
  */
 @Singleton
 class ThreatAssessmentManager @Inject constructor(

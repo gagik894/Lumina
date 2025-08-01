@@ -4,7 +4,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Domain service for managing the lifecycle and state transitions of navigation modes in the Lumina system.
+ * Domain service for managing navigation mode lifecycle and state transitions.
  *
  * This service enforces the single-responsibility principle for mode management,
  * ensuring that only one long-running navigation mode is active at any time while
@@ -14,9 +14,6 @@ import javax.inject.Singleton
  * - One primary long-running mode: NAVIGATION (the "Director Pipeline")
  * - Transient operations that temporarily pause the active mode
  * - Proper state management during mode transitions
- *
- * This is pure business logic with no coroutine or Android dependencies, making it
- * easily testable and independent of implementation details.
  */
 @Singleton
 class NavigationModeService @Inject constructor() {

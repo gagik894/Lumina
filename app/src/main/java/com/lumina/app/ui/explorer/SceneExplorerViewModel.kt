@@ -6,9 +6,15 @@ import androidx.lifecycle.viewModelScope
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
-import com.lumina.domain.repository.LuminaRepository
 import com.lumina.domain.service.TextToSpeechService
+import com.lumina.domain.usecase.AskQuestionUseCase
+import com.lumina.domain.usecase.DescribeSceneUseCase
+import com.lumina.domain.usecase.FindObjectUseCase
 import com.lumina.domain.usecase.GetInitializationStateUseCase
+import com.lumina.domain.usecase.GetNavigationCuesUseCase
+import com.lumina.domain.usecase.ProcessFrameUseCase
+import com.lumina.domain.usecase.StartCrossingModeUseCase
+import com.lumina.domain.usecase.StopNavigationUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,23 +59,26 @@ enum class NavigationCueType {
 /**
  * ViewModel for the Scene Explorer feature that manages camera frames and AI-generated navigation cues.
  *
- * This ViewModel coordinates between the camera input and the AI processing pipeline,
- * providing intelligent navigation cues with different urgency levels for visually impaired users.
- * It handles:
- * - Processing camera frames from the UI with proper throttling
- * - Monitoring AI model initialization state
- * - Streaming different types of navigation cues to the UI
- * - Text-to-speech output for accessibility
- * - Resource cleanup on destruction
- *
- * @param luminaRepository Repository providing access to AI and object detection services
+ * @param getNavigationCues Use case for getting continuous navigation cues
  * @param getInitializationState Use case for monitoring AI model initialization
+ * @param processFrame Use case for processing camera frames
+ * @param describeScene Use case for describing scenes
+ * @param startCrossingMode Use case for starting crossing mode
+ * @param findObject Use case for finding objects
+ * @param askQuestionUseCase Use case for asking questions
+ * @param stopNavigation Use case for stopping navigation
  * @param textToSpeechService Service for converting navigation cues to speech
  */
 @HiltViewModel
 class SceneExplorerViewModel @Inject constructor(
-    private val luminaRepository: LuminaRepository,
+    private val getNavigationCues: GetNavigationCuesUseCase,
     getInitializationState: GetInitializationStateUseCase,
+    private val processFrame: ProcessFrameUseCase,
+    private val describeScene: DescribeSceneUseCase,
+    private val startCrossingModeUseCase: StartCrossingModeUseCase,
+    private val findObject: FindObjectUseCase,
+    private val askQuestionUseCase: AskQuestionUseCase,
+    private val stopNavigation: StopNavigationUseCase,
     private val textToSpeechService: TextToSpeechService
 ) : ViewModel() {
 
@@ -96,7 +105,7 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     private val navigationCueFlow = merge(
-        luminaRepository.getNavigationCues(),
+        getNavigationCues(),
         manualCueFlow
     )
         .onEach { navigationCue ->
@@ -200,7 +209,7 @@ class SceneExplorerViewModel @Inject constructor(
                 image.compress(Bitmap.CompressFormat.JPEG, 50, stream)
                 val bytes = stream.toByteArray()
                 lastFrameBytes = bytes
-                luminaRepository.processNewFrame(ImageInput(bytes))
+                processFrame(ImageInput(bytes))
             } catch (e: Exception) {
                 // Record the error; the UI continues to function.
                 android.util.Log.e("SceneExplorerViewModel", "Error processing frame", e)
@@ -218,10 +227,7 @@ class SceneExplorerViewModel @Inject constructor(
     fun investigateScene() {
         val bytes = lastFrameBytes ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            luminaRepository.describeScene(
-                image = ImageInput(bytes),
-                prompt = "Provide a detailed description of the current scene for a blind user. Focus on layout, key objects, distances, and any potential obstacles."
-            ).collect { cue ->
+            describeScene(ImageInput(bytes)).collect { cue ->
                 // Forward the cue into the shared flow so that UI and TTS treat
                 // it the same way as continuous navigation cues.
                 manualCueFlow.emit(cue)
@@ -236,7 +242,7 @@ class SceneExplorerViewModel @Inject constructor(
     private fun startCrossingMode() {
         crossingJob?.cancel()
         crossingJob = viewModelScope.launch(Dispatchers.IO) {
-            luminaRepository.startCrossingMode()
+            startCrossingModeUseCase()
                 .collect { cue -> manualCueFlow.emit(cue) }
         }
     }
@@ -256,7 +262,7 @@ class SceneExplorerViewModel @Inject constructor(
     fun startFindMode(target: String) {
         findJob?.cancel()
         findJob = viewModelScope.launch(Dispatchers.IO) {
-            luminaRepository.findObject(target)
+            findObject(target)
                 .collect { cue -> manualCueFlow.emit(cue) }
         }
     }
@@ -308,7 +314,7 @@ class SceneExplorerViewModel @Inject constructor(
     private fun askQuestion(question: String) {
         questionJob?.cancel()
         questionJob = viewModelScope.launch {
-            luminaRepository.askQuestion(question).collect { cue ->
+            askQuestionUseCase(question).collect { cue ->
                 manualCueFlow.emit(cue)
             }
         }
@@ -357,6 +363,6 @@ class SceneExplorerViewModel @Inject constructor(
         findJob?.cancel()
         crossingJob?.cancel()
         textToSpeechService.shutdown()
-        luminaRepository.stopNavigation()
+        stopNavigation()
     }
 }
