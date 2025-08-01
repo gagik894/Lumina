@@ -35,41 +35,90 @@ import kotlin.coroutines.suspendCoroutine
 private const val TAG = "CameraScreen"
 
 /**
+ * Camera configuration for different use cases.
+ */
+data class CameraConfig(
+    val resolution: Size,
+    val fpsRange: Range<Int>,
+    val description: String
+) {
+    companion object {
+        /**
+         * Standard resolution for navigation - balanced performance and battery life
+         */
+        val NAVIGATION = CameraConfig(
+            resolution = Size(448, 448),
+            fpsRange = Range(15, 15),
+            description = "Navigation Mode"
+        )
+
+        /**
+         * High resolution for text reading - better OCR accuracy
+         */
+        val TEXT_READING = CameraConfig(
+            resolution = Size(1280, 720), // Much higher resolution for text
+            fpsRange = Range(10, 10), // Lower FPS since it's for single captures
+            description = "Text Reading Mode"
+        )
+
+        /**
+         * High resolution for single photo captures
+         */
+        val PHOTO_CAPTURE = CameraConfig(
+            resolution = Size(1920, 1080),
+            fpsRange = Range(5, 10),
+            description = "Photo Capture Mode"
+        )
+    }
+}
+
+/**
  * Camera screen composable that provides real-time camera feed and frame analysis.
  *
- * This component sets up CameraX for continuous camera preview and image analysis.
- * Each frame is automatically processed and passed to the provided callback for
- * AI analysis. The implementation uses:
- * - Back camera as the default camera source
- * - KEEP_ONLY_LATEST backpressure strategy for optimal performance
- * - Main executor for UI thread safety
+ * This component sets up CameraX for camera preview and image analysis with configurable
+ * resolution and frame rate based on the use case. Each frame is automatically processed
+ * and passed to the provided callback for AI analysis.
  *
  * @param onFrame Callback invoked for each camera frame, receiving a Bitmap for analysis
+ * @param showPreview Whether to show camera preview UI
+ * @param config Camera configuration specifying resolution and FPS for the use case
+ * @param isActive Whether the camera should be active (for on-demand usage)
  */
 @RequiresApi(Build.VERSION_CODES.P)
 @OptIn(ExperimentalCamera2Interop::class, androidx.camera.core.ExperimentalGetImage::class)
 @Composable
 fun CameraScreen(
     onFrame: (Bitmap) -> Unit,
-    showPreview: Boolean = false
+    showPreview: Boolean = false,
+    config: CameraConfig = CameraConfig.NAVIGATION,
+    isActive: Boolean = true
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     val previewView = remember { PreviewView(context) }
 
-    LaunchedEffect(cameraProviderFuture, showPreview) {
+    LaunchedEffect(cameraProviderFuture, showPreview, config, isActive) {
+        if (!isActive) {
+            // Camera is not active - unbind all use cases
+            val cameraProvider = cameraProviderFuture.await(context)
+            cameraProvider.unbindAll()
+            Log.d(TAG, "Camera deactivated - all use cases unbound")
+            return@LaunchedEffect
+        }
+
         val cameraProvider = cameraProviderFuture.await(context)
+        Log.d(TAG, "Setting up camera with config: ${config.description}")
 
         val analysisBuilder = ImageAnalysis.Builder()
-            .setTargetResolution(Size(448, 448))
+            .setTargetResolution(config.resolution)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_BLOCK_PRODUCER)
 
-        // Apply same FPS range to analysis use case.
+        // Apply FPS range from configuration
         Camera2Interop.Extender(analysisBuilder)
             .setCaptureRequestOption(
                 CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                Range(15, 15)
+                config.fpsRange
             )
 
         val imageAnalyzer = analysisBuilder
@@ -89,14 +138,14 @@ fun CameraScreen(
             if (cameraProvider.isBound(imageAnalyzer)) cameraProvider.unbind(imageAnalyzer)
 
             if (showPreview) {
-                // create preview use case
+                // create preview use case with same configuration
                 val previewBuilder = Preview.Builder()
-                    .setTargetResolution(Size(448, 448))
+                    .setTargetResolution(config.resolution)
 
                 Camera2Interop.Extender(previewBuilder)
                     .setCaptureRequestOption(
                         CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                        Range(15, 15)
+                        config.fpsRange
                     )
 
                 val preview = previewBuilder.build().also {

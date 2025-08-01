@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
+import com.lumina.domain.service.CameraStateService
 import com.lumina.domain.service.TextToSpeechService
 import com.lumina.domain.usecase.AskQuestionUseCase
 import com.lumina.domain.usecase.DescribeSceneUseCase
@@ -73,6 +74,7 @@ enum class NavigationCueType {
  * @param identifyCurrency Use case for identifying currency
  * @param readReceipt Use case for reading receipts
  * @param readText Use case for reading general text
+ * @param cameraStateService Service for managing camera activation state
  * @param textToSpeechService Service for converting navigation cues to speech
  */
 @HiltViewModel
@@ -88,6 +90,7 @@ class SceneExplorerViewModel @Inject constructor(
     private val identifyCurrency: IdentifyCurrencyUseCase,
     private val readReceipt: ReadReceiptUseCase,
     private val readText: ReadTextUseCase,
+    private val cameraStateService: CameraStateService,
     private val textToSpeechService: TextToSpeechService
 ) : ViewModel() {
 
@@ -108,6 +111,10 @@ class SceneExplorerViewModel @Inject constructor(
     private var findJob: Job? = null
     private var crossingJob: Job? = null
     private var questionJob: Job? = null
+
+    // Camera state management
+    val cameraMode = cameraStateService.currentMode
+    val isCameraActive = cameraStateService.isActive
 
     init {
         initializeTextToSpeech()
@@ -245,6 +252,43 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
+     * Starts navigation mode with camera activation.
+     */
+    fun startNavigation() {
+        cameraStateService.activateCamera(CameraStateService.CameraMode.NAVIGATION)
+        // Navigation cues will start flowing automatically when camera becomes active
+        speak("Navigation started")
+    }
+
+    /**
+     * Stops navigation and deactivates camera.
+     */
+    fun stopNavigationAndCamera() {
+        stopNavigation()
+        cameraStateService.deactivateCamera()
+        speak("Navigation stopped")
+    }
+
+    /**
+     * Temporarily activates camera for text reading with high resolution.
+     */
+    private fun activateTextReadingMode() {
+        val previousMode = cameraStateService.getCurrentMode()
+        cameraStateService.switchToTextReading(
+            if (previousMode == CameraStateService.CameraMode.INACTIVE)
+                CameraStateService.CameraMode.NAVIGATION
+            else previousMode
+        )
+    }
+
+    /**
+     * Returns camera to previous mode after text reading operation.
+     */
+    private fun deactivateTextReadingMode(returnToMode: CameraStateService.CameraMode = CameraStateService.CameraMode.NAVIGATION) {
+        cameraStateService.activateCamera(returnToMode)
+    }
+
+    /**
      * Starts a street crossing session.
      * The session completes automatically when the AI determines the crossing is finished.
      */
@@ -299,6 +343,14 @@ class SceneExplorerViewModel @Inject constructor(
                 stopFindMode()
                 stopCrossingMode()
                 speak("Operation cancelled")
+            }
+
+            lower == "start navigation" || lower == "start camera" -> {
+                startNavigation()
+            }
+
+            lower == "stop navigation" || lower == "stop camera" -> {
+                stopNavigationAndCamera()
             }
 
             lower == "cross street" -> {
@@ -384,48 +436,93 @@ class SceneExplorerViewModel @Inject constructor(
 
     /**
      * Identifies currency from the current camera frame.
-     * Uses the most recent captured frame for analysis.
+     * Switches to high-resolution mode for better accuracy.
      */
     fun identifyCurrencyFromFrame() {
+        // Switch to high-resolution text reading mode
+        activateTextReadingMode()
+        
         lastFrameBytes?.let { frameBytes ->
             viewModelScope.launch(Dispatchers.IO) {
-                val imageInput = ImageInput(frameBytes)
-                identifyCurrency(imageInput)
-                    .collect { cue -> manualCueFlow.emit(cue) }
+                try {
+                    val imageInput = ImageInput(frameBytes)
+                    identifyCurrency(imageInput)
+                        .collect { cue ->
+                            manualCueFlow.emit(cue)
+                            // Return to previous camera mode after completion
+                            if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                                deactivateTextReadingMode()
+                            }
+                        }
+                } catch (e: Exception) {
+                    deactivateTextReadingMode()
+                    speak("Error identifying currency. Please try again.")
+                }
             }
         } ?: run {
+            deactivateTextReadingMode()
             speak("No image available. Please point camera at currency and try again.")
         }
     }
 
     /**
      * Reads receipt or document from the current camera frame.
-     * Uses the most recent captured frame for analysis.
+     * Switches to high-resolution mode for better text recognition.
      */
     fun readReceiptFromFrame() {
+        // Switch to high-resolution text reading mode
+        activateTextReadingMode()
+        
         lastFrameBytes?.let { frameBytes ->
             viewModelScope.launch(Dispatchers.IO) {
-                val imageInput = ImageInput(frameBytes)
-                readReceipt(imageInput)
-                    .collect { cue -> manualCueFlow.emit(cue) }
+                try {
+                    val imageInput = ImageInput(frameBytes)
+                    readReceipt(imageInput)
+                        .collect { cue ->
+                            manualCueFlow.emit(cue)
+                            // Return to previous camera mode after completion
+                            if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                                deactivateTextReadingMode()
+                            }
+                        }
+                } catch (e: Exception) {
+                    deactivateTextReadingMode()
+                    speak("Error reading receipt. Please try again.")
+                }
             }
         } ?: run {
+            deactivateTextReadingMode()
             speak("No image available. Please point camera at receipt and try again.")
         }
     }
 
     /**
      * Reads any text from the current camera frame.
-     * Uses the most recent captured frame for analysis.
+     * Switches to high-resolution mode for better text recognition.
      */
     fun readTextFromFrame() {
+        // Switch to high-resolution text reading mode
+        activateTextReadingMode()
+        
         lastFrameBytes?.let { frameBytes ->
             viewModelScope.launch(Dispatchers.IO) {
-                val imageInput = ImageInput(frameBytes)
-                readText(imageInput)
-                    .collect { cue -> manualCueFlow.emit(cue) }
+                try {
+                    val imageInput = ImageInput(frameBytes)
+                    readText(imageInput)
+                        .collect { cue ->
+                            manualCueFlow.emit(cue)
+                            // Return to previous camera mode after completion
+                            if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                                deactivateTextReadingMode()
+                            }
+                        }
+                } catch (e: Exception) {
+                    deactivateTextReadingMode()
+                    speak("Error reading text. Please try again.")
+                }
             }
         } ?: run {
+            deactivateTextReadingMode()
             speak("No image available. Please point camera at text and try again.")
         }
     }
@@ -437,5 +534,7 @@ class SceneExplorerViewModel @Inject constructor(
         crossingJob?.cancel()
         textToSpeechService.shutdown()
         stopNavigation()
+        // Deactivate camera when ViewModel is cleared
+        cameraStateService.deactivateCamera()
     }
 }
