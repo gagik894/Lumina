@@ -132,4 +132,34 @@ class PromptGenerator @Inject constructor(
     fun generateTextReadingPrompt(): String {
         return promptGenerationService.generateTextReadingPrompt()
     }
+
+    /**
+     * Generates a prompt for multi-frame currency identification analysis.
+     * The prompt indicates that multiple frames show the same currency for better accuracy.
+     *
+     * @return Prompt designed for multi-frame currency analysis
+     */
+    fun generateMultiFrameCurrencyPrompt(): String {
+        return promptGenerationService.generateMultiFrameCurrencyPrompt()
+    }
+
+    /**
+     * Generates a prompt for multi-frame receipt reading analysis.
+     * The prompt indicates that multiple frames show the same receipt for better accuracy.
+     *
+     * @return Prompt designed for multi-frame receipt analysis
+     */
+    fun generateMultiFrameReceiptPrompt(): String {
+        return promptGenerationService.generateMultiFrameReceiptPrompt()
+    }
+
+    /**
+     * Generates a prompt for multi-frame text reading analysis.
+     * The prompt indicates that multiple frames show the same document for better accuracy.
+     *
+     * @return Prompt designed for multi-frame text analysis
+     */
+    fun generateMultiFrameTextPrompt(): String {
+        return promptGenerationService.generateMultiFrameTextPrompt()
+    }
 }

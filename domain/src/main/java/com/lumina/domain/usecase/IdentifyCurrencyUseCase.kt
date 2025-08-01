@@ -33,4 +33,20 @@ class IdentifyCurrencyUseCase @Inject constructor(
     operator fun invoke(image: ImageInput): Flow<NavigationCue> {
         return repository.identifyCurrency(image)
     }
+
+    /**
+     * Invokes the use case to identify currency from multiple image frames for better accuracy.
+     *
+     * The AI will analyze multiple frames of the same currency to determine:
+     * - Currency denomination and value with improved accuracy
+     * - Country of origin
+     * - Bill or coin characteristics (color, size, features)
+     * - Any security features or markings
+     *
+     * @param images List of image inputs containing frames of the same currency.
+     * @return A flow of NavigationCue containing currency identification details
+     */
+    fun identifyMultiFrame(images: List<ImageInput>): Flow<NavigationCue> {
+        return repository.identifyCurrencyMultiFrame(images)
+    }
 }

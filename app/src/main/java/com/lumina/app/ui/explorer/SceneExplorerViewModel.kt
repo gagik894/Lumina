@@ -1,6 +1,7 @@
 package com.lumina.app.ui.explorer
 
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lumina.domain.model.ImageInput
@@ -18,6 +19,7 @@ import com.lumina.domain.usecase.ProcessFrameUseCase
 import com.lumina.domain.usecase.ReadReceiptUseCase
 import com.lumina.domain.usecase.ReadTextUseCase
 import com.lumina.domain.usecase.StartCrossingModeUseCase
+import com.lumina.domain.usecase.StartNavigationUseCase
 import com.lumina.domain.usecase.StopNavigationUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +29,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
@@ -71,6 +75,7 @@ enum class NavigationCueType {
  * @param findObject Use case for finding objects
  * @param askQuestionUseCase Use case for asking questions
  * @param stopNavigation Use case for stopping navigation
+ * @param startNavigation Use case for starting navigation pipeline
  * @param identifyCurrency Use case for identifying currency
  * @param readReceipt Use case for reading receipts
  * @param readText Use case for reading general text
@@ -87,12 +92,17 @@ class SceneExplorerViewModel @Inject constructor(
     private val findObject: FindObjectUseCase,
     private val askQuestionUseCase: AskQuestionUseCase,
     private val stopNavigation: StopNavigationUseCase,
+    private val startNavigation: StartNavigationUseCase,
     private val identifyCurrency: IdentifyCurrencyUseCase,
     private val readReceipt: ReadReceiptUseCase,
     private val readText: ReadTextUseCase,
     private val cameraStateService: CameraStateService,
     private val textToSpeechService: TextToSpeechService
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "SceneExplorerViewModel"
+    }
 
     private var lastFrameProcessedTime = 0L
     private val frameThrottleInterval = 100L // Process max 10 frames per second
@@ -121,7 +131,14 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     private val navigationCueFlow = merge(
-        getNavigationCues(),
+        // Only collect navigation cues when camera is active in navigation mode
+        cameraStateService.currentMode.flatMapLatest { mode ->
+            if (mode == CameraStateService.CameraMode.NAVIGATION) {
+                getNavigationCues()
+            } else {
+                emptyFlow()
+            }
+        },
         manualCueFlow
     )
         .onEach { navigationCue ->
@@ -271,64 +288,148 @@ class SceneExplorerViewModel @Inject constructor(
 
     /**
      * Temporarily activates camera for text reading with high resolution.
+     * Camera will be turned ON for this transient operation.
      */
     private fun activateTextReadingMode() {
-        val previousMode = cameraStateService.getCurrentMode()
-        cameraStateService.switchToTextReading(
-            if (previousMode == CameraStateService.CameraMode.INACTIVE)
-                CameraStateService.CameraMode.NAVIGATION
-            else previousMode
-        )
+        cameraStateService.switchToTextReading()
     }
 
     /**
-     * Returns camera to previous mode after text reading operation.
+     * Deactivates camera after text reading operation.
+     * Camera will be turned OFF to conserve battery and maintain privacy.
+     * Also clears frame buffer to free memory and ensure fresh frames for next operation.
      */
-    private fun deactivateTextReadingMode(returnToMode: CameraStateService.CameraMode = CameraStateService.CameraMode.NAVIGATION) {
-        cameraStateService.activateCamera(returnToMode)
+    private fun deactivateTextReadingMode() {
+        cameraStateService.deactivateCamera()
+        // Clear frame buffer by stopping and immediately starting navigation if needed
+        // This ensures clean state for next operation
+        stopNavigation()
     }
 
     /**
-     * Starts a street crossing session.
-     * The session completes automatically when the AI determines the crossing is finished.
+     * Waits for a camera frame to become available after camera activation.
+     * Returns null if no frame is available within the timeout period.
+     */
+    private suspend fun waitForFrame(timeoutMs: Long = 2000): ByteArray? {
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            lastFrameBytes?.let { return it }
+            kotlinx.coroutines.delay(100) // Check every 100ms
+        }
+        return null
+    }
+
+    /**
+     * Captures multiple frames for better text reading accuracy.
+     * Returns a list of frames captured over a short period.
+     */
+    private suspend fun captureMultipleFrames(
+        frameCount: Int = 3,
+        intervalMs: Long = 200
+    ): List<ByteArray> {
+        val frames = mutableListOf<ByteArray>()
+
+        repeat(frameCount) { frameIndex ->
+            val frame = waitForFrame(1000) // Shorter timeout per frame
+            if (frame != null) {
+                frames.add(frame)
+                if (frameIndex < frameCount - 1) {
+                    kotlinx.coroutines.delay(intervalMs) // Wait between frames
+                }
+            }
+        }
+
+        return frames
+    }
+
+    /**
+     * Starts a street crossing session with camera activation.
+     * The session completes automatically when the AI determines the crossing is finished,
+     * and the camera is deactivated afterward.
      */
     private fun startCrossingMode() {
         crossingJob?.cancel()
         crossingJob = viewModelScope.launch(Dispatchers.IO) {
-            startCrossingModeUseCase()
-                .collect { cue -> manualCueFlow.emit(cue) }
+            try {
+                // Activate camera for navigation mode (crossing assistance)
+                cameraStateService.switchToNavigation()
+
+                startCrossingModeUseCase()
+                    .collect { cue ->
+                        manualCueFlow.emit(cue)
+                        // Deactivate camera when crossing session completes
+                        if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                            cameraStateService.deactivateCamera()
+                        }
+                    }
+            } catch (e: Exception) {
+                // Ensure camera is deactivated on error
+                cameraStateService.deactivateCamera()
+                manualCueFlow.emit(
+                    NavigationCue.InformationalAlert(
+                        message = "Error during crossing session. Please try again.",
+                        isDone = true
+                    )
+                )
+            }
         }
     }
 
     /**
-     * Manually stops an active crossing session, if any.
+     * Manually stops an active crossing session and deactivates camera.
      */
     private fun stopCrossingMode() {
         crossingJob?.cancel()
         crossingJob = null
+        cameraStateService.deactivateCamera()
     }
 
     /**
-     * Starts an object-finding session. The session completes automatically
-     * when the requested object is detected.
+     * Starts an object-finding session with camera activation.
+     * The session completes automatically when the requested object is detected,
+     * and the camera is deactivated afterward.
      */
     fun startFindMode(target: String) {
         findJob?.cancel()
         findJob = viewModelScope.launch(Dispatchers.IO) {
-            findObject(target)
-                .collect { cue -> manualCueFlow.emit(cue) }
+            try {
+                // Activate camera for navigation mode (finding objects)
+                cameraStateService.switchToNavigation()
+
+                findObject(target)
+                    .collect { cue ->
+                        manualCueFlow.emit(cue)
+                        // Deactivate camera when object is found and session completes
+                        if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                            cameraStateService.deactivateCamera()
+                        }
+                    }
+            } catch (e: Exception) {
+                // Ensure camera is deactivated on error
+                cameraStateService.deactivateCamera()
+                manualCueFlow.emit(
+                    NavigationCue.InformationalAlert(
+                        message = "Error finding object. Please try again.",
+                        isDone = true
+                    )
+                )
+            }
         }
     }
 
-    /** Stops an active find session, if any. */
+    /**
+     * Stops an active find session and deactivates camera.
+     */
     fun stopFindMode() {
         findJob?.cancel()
         findJob = null
+        cameraStateService.deactivateCamera()
     }
 
     /** Entry point from voice commands. */
     fun handleVoiceCommand(command: String) {
         val lower = command.trim().lowercase()
+        Log.d("VoiceCommand", "🎤 Processing voice command: '$lower'")
 
         when {
             lower.startsWith("find ") -> {
@@ -342,11 +443,12 @@ class SceneExplorerViewModel @Inject constructor(
             lower == "cancel" || lower == "stop" -> {
                 stopFindMode()
                 stopCrossingMode()
+                deactivateCameraAndClearBuffer() // Deactivate optimistic camera activation with buffer clear
                 speak("Operation cancelled")
             }
 
             lower == "start navigation" || lower == "start camera" -> {
-                startNavigation()
+                startNavigation() // This will handle camera activation properly
             }
 
             lower == "stop navigation" || lower == "stop camera" -> {
@@ -355,29 +457,30 @@ class SceneExplorerViewModel @Inject constructor(
 
             lower == "cross street" -> {
                 speak("Starting crossing mode. Please wait for instructions.")
-                startCrossingMode()
+                startCrossingMode() // Camera will be managed by crossing mode
             }
 
             lower == "read money" || lower == "identify currency" -> {
                 speak("Identifying currency")
-                identifyCurrencyFromFrame()
+                identifyCurrencyFromFrame() // Uses optimistic camera activation
             }
 
             lower == "read receipt" -> {
                 speak("Reading receipt")
-                readReceiptFromFrame()
+                readReceiptFromFrame() // Uses optimistic camera activation
             }
 
             lower == "read text" -> {
                 speak("Reading text")
-                readTextFromFrame()
+                readTextFromFrame() // Uses optimistic camera activation
             }
 
             lower.startsWith("question") -> {
                 val question = lower.removePrefix("question").trim()
                 if (question.isNotEmpty()) {
-                    askQuestion(question)
+                    askQuestion(question) // Uses optimistic camera activation for visual questions
                 } else {
+                    deactivateCameraAndClearBuffer() // No visual question, deactivate with buffer clear
                     speak("What is your question?")
                 }
             }
@@ -435,95 +538,125 @@ class SceneExplorerViewModel @Inject constructor(
     fun isSpeaking(): Boolean = textToSpeechService.isSpeaking()
 
     /**
+     * Optimistically activates camera when voice input starts.
+     * This provides faster response time for commands that need camera access.
+     * The camera will be in TEXT_READING mode which provides high resolution for most operations.
+     * If the voice command doesn't need camera, it will be deactivated quickly.
+     */
+    fun optimisticallyActivateCamera() {
+        cameraStateService.switchToTextReading()
+        Log.d(TAG, "🎤📸 Optimistically activated camera for voice command")
+    }
+
+    /**
+     * Deactivates camera and clears frame buffer for non-camera operations.
+     * This ensures clean state and frees memory when camera is not needed.
+     */
+    private fun deactivateCameraAndClearBuffer() {
+        cameraStateService.deactivateCamera()
+        stopNavigation() // This clears the frame buffer
+        Log.d(TAG, "🎤🔴 Deactivated optimistic camera and cleared buffer")
+    }
+
+    /**
      * Identifies currency from the current camera frame.
-     * Switches to high-resolution mode for better accuracy.
+     * Activates camera, waits for frame, then deactivates camera.
      */
     fun identifyCurrencyFromFrame() {
-        // Switch to high-resolution text reading mode
-        activateTextReadingMode()
-        
-        lastFrameBytes?.let { frameBytes ->
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Activate camera for text reading
+                activateTextReadingMode()
+
+                // Wait for camera to initialize and provide frames
+                val frameBytes = waitForFrame()
+
+                if (frameBytes != null) {
                     val imageInput = ImageInput(frameBytes)
                     identifyCurrency(imageInput)
                         .collect { cue ->
                             manualCueFlow.emit(cue)
-                            // Return to previous camera mode after completion
+                            // Deactivate camera after completion
                             if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                                 deactivateTextReadingMode()
                             }
                         }
-                } catch (e: Exception) {
+                } else {
                     deactivateTextReadingMode()
-                    speak("Error identifying currency. Please try again.")
+                    speak("No image available. Please ensure camera is working and try again.")
                 }
+            } catch (e: Exception) {
+                deactivateTextReadingMode()
+                speak("Error identifying currency. Please try again.")
             }
-        } ?: run {
-            deactivateTextReadingMode()
-            speak("No image available. Please point camera at currency and try again.")
         }
     }
 
     /**
      * Reads receipt or document from the current camera frame.
-     * Switches to high-resolution mode for better text recognition.
+     * Activates camera, waits for frame, then deactivates camera.
      */
     fun readReceiptFromFrame() {
-        // Switch to high-resolution text reading mode
-        activateTextReadingMode()
-        
-        lastFrameBytes?.let { frameBytes ->
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Activate camera for text reading
+                activateTextReadingMode()
+
+                // Wait for camera to initialize and provide frames
+                val frameBytes = waitForFrame()
+
+                if (frameBytes != null) {
                     val imageInput = ImageInput(frameBytes)
                     readReceipt(imageInput)
                         .collect { cue ->
                             manualCueFlow.emit(cue)
-                            // Return to previous camera mode after completion
+                            // Deactivate camera after completion
                             if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                                 deactivateTextReadingMode()
                             }
                         }
-                } catch (e: Exception) {
+                } else {
                     deactivateTextReadingMode()
-                    speak("Error reading receipt. Please try again.")
+                    speak("No image available. Please ensure camera is working and try again.")
                 }
+            } catch (e: Exception) {
+                deactivateTextReadingMode()
+                speak("Error reading receipt. Please try again.")
             }
-        } ?: run {
-            deactivateTextReadingMode()
-            speak("No image available. Please point camera at receipt and try again.")
         }
     }
 
     /**
      * Reads any text from the current camera frame.
-     * Switches to high-resolution mode for better text recognition.
+     * Activates camera, waits for frame, then deactivates camera.
      */
     fun readTextFromFrame() {
-        // Switch to high-resolution text reading mode
-        activateTextReadingMode()
-        
-        lastFrameBytes?.let { frameBytes ->
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Activate camera for text reading
+                activateTextReadingMode()
+
+                // Wait for camera to initialize and provide frames
+                val frameBytes = waitForFrame()
+
+                if (frameBytes != null) {
                     val imageInput = ImageInput(frameBytes)
                     readText(imageInput)
                         .collect { cue ->
                             manualCueFlow.emit(cue)
-                            // Return to previous camera mode after completion
+                            // Deactivate camera after completion
                             if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                                 deactivateTextReadingMode()
                             }
                         }
-                } catch (e: Exception) {
+                } else {
                     deactivateTextReadingMode()
-                    speak("Error reading text. Please try again.")
+                    speak("No image available. Please ensure camera is working and try again.")
                 }
+            } catch (e: Exception) {
+                deactivateTextReadingMode()
+                speak("Error reading text. Please try again.")
             }
-        } ?: run {
-            deactivateTextReadingMode()
-            speak("No image available. Please point camera at text and try again.")
         }
     }
 

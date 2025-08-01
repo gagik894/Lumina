@@ -17,6 +17,10 @@ import javax.inject.Singleton
 @Singleton
 class CameraStateService @Inject constructor() {
 
+    companion object {
+        private const val TAG = "CameraStateService"
+    }
+
     /**
      * Defines different camera usage modes with specific configurations.
      */
@@ -51,6 +55,7 @@ class CameraStateService @Inject constructor() {
             return
         }
 
+        println(TAG + "🟢 Camera ACTIVATED: $mode")
         _currentMode.value = mode
         _isActive.value = true
     }
@@ -59,6 +64,7 @@ class CameraStateService @Inject constructor() {
      * Deactivates the camera completely.
      */
     fun deactivateCamera() {
+        println(TAG + "🔴 Camera DEACTIVATED (was: ${_currentMode.value})")
         _currentMode.value = CameraMode.INACTIVE
         _isActive.value = false
     }
@@ -83,12 +89,28 @@ class CameraStateService @Inject constructor() {
 
     /**
      * Temporarily switches to text reading mode for high-resolution capture.
-     * Automatically returns to previous mode after operation.
-     *
-     * @param previousMode Mode to return to after text reading
+     * This is a transient operation that should be followed by deactivateCamera().
      */
-    fun switchToTextReading(previousMode: CameraMode = CameraMode.NAVIGATION) {
+    fun switchToTextReading() {
+        println(TAG + "⚡ Switching to TEXT_READING mode")
         activateCamera(CameraMode.TEXT_READING)
-        // Note: Caller should handle returning to previous mode after operation
+    }
+
+    /**
+     * Temporarily switches to navigation mode for environmental monitoring.
+     * This should be used for on-demand navigation sessions.
+     */
+    fun switchToNavigation() {
+        println(TAG + "⚡ Switching to NAVIGATION mode")
+        activateCamera(CameraMode.NAVIGATION)
+    }
+
+    /**
+     * Temporarily switches to photo capture mode for single high-quality shots.
+     * This is a transient operation that should be followed by deactivateCamera().
+     */
+    fun switchToPhotoCapture() {
+        println(TAG + "⚡ Switching to PHOTO_CAPTURE mode")
+        activateCamera(CameraMode.PHOTO_CAPTURE)
     }
 }

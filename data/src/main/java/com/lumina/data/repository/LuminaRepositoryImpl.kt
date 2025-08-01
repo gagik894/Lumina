@@ -191,8 +191,18 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     override fun getNavigationCues(): Flow<NavigationCue> {
-        startDirectorPipeline()
+        // Note: Navigation is now purely transient - only runs when explicitly started
+        // No automatic startup - must call startNavigationPipeline() first
         return alertCoordinator.getNavigationCueFlow()
+    }
+
+    /**
+     * Starts the navigation director pipeline explicitly for transient navigation sessions.
+     * Navigation will run until explicitly stopped with stopNavigation().
+     * No automatic resumption after other operations.
+     */
+    override fun startNavigationPipeline() {
+        startDirectorPipeline()
     }
 
     override suspend fun processNewFrame(image: ImageInput) {
@@ -202,6 +212,7 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     override fun stopNavigation() {
+        Log.d(TAG, "🛑 Explicitly stopping navigation pipeline")
         navigationModeManager.stopAllModes()
         objectDetectorDataSource.setPaused(true)
         gemmaDataSource.resetSession()
@@ -210,17 +221,13 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Pauses the active navigation mode to allow transient operations to run exclusively.
-     *
-     * This is a simplified wrapper around the navigation mode manager that also
-     * pauses object detection to prevent resource conflicts.
+     * NOTE: Pause/resume navigation functionality has been simplified.
+     * Navigation is now purely transient - it starts when explicitly requested
+     * and stops when explicitly requested. No automatic coordination between operations.
      */
     private suspend fun pauseNavigation() {
-        navigationModeManager.pauseActiveMode()
-        objectDetectorDataSource.setPaused(true)
-
-        // Wait for any ongoing AI operations to complete before proceeding
-        // This prevents the "Previous invocation still processing" error
+        // Simplified: Just wait for ongoing AI operations to complete
+        // No navigation mode management needed since operations are independent
         waitForAiOperationToComplete()
     }
 
@@ -351,7 +358,6 @@ class LuminaRepositoryImpl @Inject constructor(
                     }
                 }
             } finally {
-                resumeNavigation()
             }
             awaitClose { }
         }
@@ -516,16 +522,14 @@ class LuminaRepositoryImpl @Inject constructor(
                     }
                 }
             } finally {
-                resumeNavigation()
+                // Note: No automatic navigation resumption - camera lifecycle is managed externally
+                // Object finding is transient and camera should be deactivated when complete
             }
         }
     }
 
     override fun askQuestion(question: String): Flow<NavigationCue> {
         return callbackFlow<NavigationCue> {
-            // Pause navigation first to prevent AI conflicts
-            pauseNavigation()
-
             try {
                 transientOperationCoordinator.executeTransientOperation("ask_question") {
                     if (!isActive) return@executeTransientOperation
@@ -549,18 +553,22 @@ class LuminaRepositoryImpl @Inject constructor(
                             if (done) close()
                         }
                 }
-            } finally {
-                resumeNavigation()
+            } catch (e: Exception) {
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to answer question. Please try again.",
+                        true
+                    )
+                )
+                close()
             }
+            // Note: No navigation pause/resume - operations are independent
             awaitClose { }
         }
     }
 
     override fun startCrossingMode(): Flow<NavigationCue> {
         return callbackFlow<NavigationCue> {
-            // Pause navigation first to prevent AI conflicts
-            pauseNavigation()
-
             try {
                 transientOperationCoordinator.executeTransientOperation("crossing_mode") {
                     if (!isActive) return@executeTransientOperation
@@ -597,35 +605,26 @@ class LuminaRepositoryImpl @Inject constructor(
                         crossingJob.cancel()
                     }
                 }
-            } finally {
-                resumeNavigation()
+            } catch (e: Exception) {
+                Log.e(TAG, "Crossing mode failed", e)
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to start crossing mode. Please try again.",
+                        true
+                    )
+                )
+                close()
             }
+            // Note: No navigation pause/resume - operations are independent
         }
     }
 
 
     /**
-     * Resumes the previously paused navigation mode after a transient operation completes.
-     *
-     * This method determines what mode should be resumed and restarts it appropriately.
+     * NOTE: Resume navigation functionality has been removed.
+     * Navigation is now purely transient - it starts when explicitly requested
+     * and stops when explicitly requested. No automatic resumption needed.
      */
-    private fun resumeNavigation() {
-        val pausedMode = navigationModeManager.getPausedMode()
-
-        when (pausedMode) {
-            NavigationModeService.OperatingMode.NAVIGATION -> {
-                startDirectorPipeline()
-            }
-
-            null -> {
-                // If no mode was paused, default to starting the main navigation pipeline
-                Log.d(TAG, "No paused mode found, starting default navigation pipeline")
-                startDirectorPipeline()
-            }
-        }
-
-        navigationModeManager.clearPausedMode()
-    }
 
     /**
      * Generates AI responses with proper serialization to prevent concurrent access issues.
@@ -728,12 +727,11 @@ class LuminaRepositoryImpl @Inject constructor(
                     )
                 )
                 close()
-            } finally {
-                resumeNavigation()
             }
+            // Note: No automatic navigation resumption - camera lifecycle is managed externally
 
             awaitClose {
-                resumeNavigation()
+                // Note: No automatic navigation resumption - camera lifecycle is managed externally
             }
         }
     }
@@ -770,12 +768,11 @@ class LuminaRepositoryImpl @Inject constructor(
                     )
                 )
                 close()
-            } finally {
-                resumeNavigation()
             }
+            // Note: No automatic navigation resumption - camera lifecycle is managed externally
 
             awaitClose {
-                resumeNavigation()
+                // Note: No automatic navigation resumption - camera lifecycle is managed externally
             }
         }
     }
@@ -812,13 +809,186 @@ class LuminaRepositoryImpl @Inject constructor(
                     )
                 )
                 close()
-            } finally {
-                resumeNavigation()
             }
+            // Note: No automatic navigation resumption - camera lifecycle is managed externally
 
             awaitClose {
-                resumeNavigation()
+                // Note: No automatic navigation resumption - camera lifecycle is managed externally
             }
+        }
+    }
+
+    override fun identifyCurrencyMultiFrame(images: List<ImageInput>): Flow<NavigationCue> {
+        return callbackFlow<NavigationCue> {
+            try {
+                transientOperationCoordinator.executeTransientOperation("identify_currency_multi") {
+                    if (!isActive) return@executeTransientOperation
+
+                    // Process input images through frame buffer for quality selection
+                    images.forEach { image ->
+                        val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                        frameBufferManager.addFrame(bitmap, System.currentTimeMillis())
+                    }
+
+                    // Wait a moment for frame buffer to process
+                    kotlinx.coroutines.delay(200)
+
+                    // Get multiple high-quality, non-blurred frames from frame buffer
+                    val qualityFrames =
+                        frameBufferManager.getMotionAnalysisFrames() // Get up to 3 best frames
+                    println("Quality frames selected: ${qualityFrames.size}")
+                    if (qualityFrames.isEmpty()) {
+                        trySend(
+                            NavigationCue.InformationalAlert(
+                                "No quality frames available. Please try again.",
+                                true
+                            )
+                        )
+                        close()
+                        return@executeTransientOperation
+                    }
+
+                    try {
+                        val prompt = promptGenerator.generateMultiFrameCurrencyPrompt()
+
+                        // Use frame buffer's high-quality frames
+                        generateSerializedResponse(prompt, qualityFrames)
+                            .collect { (chunk, done) ->
+                                trySend(NavigationCue.InformationalAlert(chunk, done))
+                                if (done) close()
+                            }
+                    } finally {
+                        // Frames are managed by frame buffer, no need to recycle manually
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Multi-frame currency identification failed", e)
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to identify currency. Please try again.",
+                        true
+                    )
+                )
+                close()
+            }
+
+            awaitClose { }
+        }
+    }
+
+    override fun readReceiptMultiFrame(images: List<ImageInput>): Flow<NavigationCue> {
+        return callbackFlow<NavigationCue> {
+            try {
+                transientOperationCoordinator.executeTransientOperation("read_receipt_multi") {
+                    if (!isActive) return@executeTransientOperation
+
+                    // Process input images through frame buffer for quality selection
+                    images.forEach { image ->
+                        val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                        frameBufferManager.addFrame(bitmap, System.currentTimeMillis())
+                    }
+
+                    // Wait a moment for frame buffer to process
+                    kotlinx.coroutines.delay(200)
+
+                    // Get multiple high-quality, non-blurred frames from frame buffer
+                    val qualityFrames =
+                        frameBufferManager.getMotionAnalysisFrames() // Get up to 3 best frames
+
+                    if (qualityFrames.isEmpty()) {
+                        trySend(
+                            NavigationCue.InformationalAlert(
+                                "No quality frames available. Please try again.",
+                                true
+                            )
+                        )
+                        close()
+                        return@executeTransientOperation
+                    }
+
+                    try {
+                        val prompt = promptGenerator.generateMultiFrameReceiptPrompt()
+
+                        // Use frame buffer's high-quality frames
+                        generateSerializedResponse(prompt, qualityFrames)
+                            .collect { (chunk, done) ->
+                                trySend(NavigationCue.InformationalAlert(chunk, done))
+                                if (done) close()
+                            }
+                    } finally {
+                        // Frames are managed by frame buffer, no need to recycle manually
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Multi-frame receipt reading failed", e)
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to read receipt. Please try again.",
+                        true
+                    )
+                )
+                close()
+            }
+
+            awaitClose { }
+        }
+    }
+
+    override fun readTextMultiFrame(images: List<ImageInput>): Flow<NavigationCue> {
+        return callbackFlow<NavigationCue> {
+            try {
+                transientOperationCoordinator.executeTransientOperation("read_text_multi") {
+                    if (!isActive) return@executeTransientOperation
+
+                    // Process input images through frame buffer for quality selection
+                    images.forEach { image ->
+                        val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                        frameBufferManager.addFrame(bitmap, System.currentTimeMillis())
+                    }
+
+                    // Wait a moment for frame buffer to process
+                    kotlinx.coroutines.delay(200)
+
+                    // Get multiple high-quality, non-blurred frames from frame buffer
+                    val qualityFrames =
+                        frameBufferManager.getMotionAnalysisFrames() // Get up to 3 best frames
+
+                    if (qualityFrames.isEmpty()) {
+                        trySend(
+                            NavigationCue.InformationalAlert(
+                                "No quality frames available. Please try again.",
+                                true
+                            )
+                        )
+                        close()
+                        return@executeTransientOperation
+                    }
+
+                    try {
+                        val prompt = promptGenerator.generateMultiFrameTextPrompt()
+
+                        // Use frame buffer's high-quality frames
+                        generateSerializedResponse(prompt, qualityFrames)
+                            .collect { (chunk, done) ->
+                                trySend(NavigationCue.InformationalAlert(chunk, done))
+                                if (done) close()
+                            }
+                    } finally {
+                        // Frames are managed by frame buffer, no need to recycle manually
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Multi-frame text reading failed", e)
+                trySend(
+                    NavigationCue.InformationalAlert(
+                        "Unable to read text. Please try again.",
+                        true
+                    )
+                )
+                close()
+            }
+
+            awaitClose { }
         }
     }
 }

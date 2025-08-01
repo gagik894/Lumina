@@ -30,6 +30,12 @@ interface LuminaRepository {
     fun getNavigationCues(): Flow<NavigationCue>
 
     /**
+     * Explicitly starts the navigation director pipeline for on-demand usage.
+     * This should be called when the user activates navigation mode.
+     */
+    fun startNavigationPipeline()
+
+    /**
      * Processes a new camera frame for object detection and potential AI analysis.
      *
      * @param image Camera frame to be analyzed.
@@ -102,4 +108,31 @@ interface LuminaRepository {
      * @return A flow of navigation cues containing the extracted text.
      */
     fun readText(image: ImageInput): Flow<NavigationCue>
+
+    /**
+     * Identifies currency from multiple frames for better accuracy. This is a one-shot operation.
+     * Multiple frames help improve recognition accuracy and handle motion blur.
+     *
+     * @param images List of images containing the same currency from different angles/moments.
+     * @return A flow of navigation cues containing currency identification details.
+     */
+    fun identifyCurrencyMultiFrame(images: List<ImageInput>): Flow<NavigationCue>
+
+    /**
+     * Reads receipt or document text from multiple frames for better accuracy. This is a one-shot operation.
+     * Multiple frames help improve text recognition and handle motion blur or partial visibility.
+     *
+     * @param images List of images containing the same document from different angles/moments.
+     * @return A flow of navigation cues containing the organized text content.
+     */
+    fun readReceiptMultiFrame(images: List<ImageInput>): Flow<NavigationCue>
+
+    /**
+     * Reads general text from multiple frames for better accuracy. This is a one-shot operation.
+     * Multiple frames help improve text recognition and handle motion blur or partial visibility.
+     *
+     * @param images List of images containing the same text from different angles/moments.
+     * @return A flow of navigation cues containing the text content.
+     */
+    fun readTextMultiFrame(images: List<ImageInput>): Flow<NavigationCue>
 }

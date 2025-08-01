@@ -92,9 +92,37 @@ fun SceneExplorerScreen(
                         InitializationScreen(uiState.isTtsInitialized)
                     }
                     is InitializationState.Initialized -> {
+                        val cameraMode by viewModel.cameraMode.collectAsState()
+                        val isCameraActive by viewModel.isCameraActive.collectAsState()
+
+                        // Log camera state changes for debugging
+                        androidx.compose.runtime.LaunchedEffect(cameraMode, isCameraActive) {
+                            Log.d(
+                                TAG,
+                                "📱 UI Camera State: mode=$cameraMode, active=$isCameraActive"
+                            )
+                        }
+
+                        // Configure camera based on current mode
+                        val cameraConfig = when (cameraMode) {
+                            com.lumina.domain.service.CameraStateService.CameraMode.NAVIGATION ->
+                                com.lumina.app.ui.camera.CameraConfig.NAVIGATION
+
+                            com.lumina.domain.service.CameraStateService.CameraMode.TEXT_READING ->
+                                com.lumina.app.ui.camera.CameraConfig.TEXT_READING
+
+                            com.lumina.domain.service.CameraStateService.CameraMode.PHOTO_CAPTURE ->
+                                com.lumina.app.ui.camera.CameraConfig.PHOTO_CAPTURE
+
+                            com.lumina.domain.service.CameraStateService.CameraMode.INACTIVE ->
+                                com.lumina.app.ui.camera.CameraConfig.NAVIGATION // Default config when inactive
+                        }
+                        
                         CameraScreen(
                             onFrame = viewModel::onFrameReceived,
-                            showPreview = previewToggle.value
+                            showPreview = previewToggle.value,
+                            config = cameraConfig,
+                            isActive = isCameraActive
                         )
 
 //                        if (BuildConfig.DEBUG) {
@@ -164,6 +192,10 @@ private fun startVoiceCommand(context: android.content.Context, viewModel: Scene
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000)
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000)
     }
+
+    // Optimistically activate camera for voice commands that might need it
+    // This provides faster response time for text reading and object finding commands
+    viewModel.optimisticallyActivateCamera()
 
     // Audible prompt for the user.
     viewModel.speak("Listening.")
