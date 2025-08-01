@@ -61,6 +61,20 @@ class FrameBufferManager @Inject constructor() {
     }
 
     /**
+     * Retrieves the best quality (sharpest) recent frame for single-frame AI analysis.
+     *
+     * This method uses the FrameSelector to find the sharpest frame from recent frames,
+     * ensuring optimal image quality for AI processing. This significantly improves
+     * AI response quality compared to using potentially blurred latest frames.
+     *
+     * @return The best quality recent frame, or null if buffer is empty
+     */
+    @Synchronized
+    fun getBestQualityFrame(): TimestampedFrame? {
+        return FrameSelector.selectBestQualityFrame(frameBuffer.toList())
+    }
+
+    /**
      * Selects optimal frames for motion analysis using the FrameSelector utility.
      *
      * This method leverages the FrameSelector to intelligently choose frames that:

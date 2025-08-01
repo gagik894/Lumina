@@ -43,6 +43,25 @@ object FrameSelector {
         return listOfNotNull(sharpOlder, sharpLatest).distinct()
     }
 
+    /**
+     * Selects the best quality (sharpest) frame from recent frames for single-frame AI analysis.
+     *
+     * This method prioritizes the most recent sharp frame, falling back to older frames
+     * if necessary to avoid using blurred images. This significantly improves AI quality.
+     *
+     * @param buffer List of available frames
+     * @return The best quality frame, or null if buffer is empty
+     */
+    fun selectBestQualityFrame(buffer: List<TimestampedFrame>): TimestampedFrame? {
+        if (buffer.isEmpty()) return null
+        if (buffer.size == 1) return buffer.last()
+
+        val latestIdx = buffer.lastIndex
+
+        // Try to find a sharp frame near the latest, prioritizing recent frames
+        return findSharpNear(buffer, latestIdx)
+    }
+
     private fun findSharpNear(buffer: List<TimestampedFrame>, index: Int): TimestampedFrame {
         // Exact index first
         if (isSharp(buffer[index].bitmap)) return buffer[index]

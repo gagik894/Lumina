@@ -394,8 +394,8 @@ class LuminaRepositoryImpl @Inject constructor(
                                             )
                                         )
 
-                                        val latestFrame = frameBufferManager.getLatestFrame()
-                                        if (latestFrame == null) return@collect
+                                        val bestFrame = frameBufferManager.getBestQualityFrame()
+                                        if (bestFrame == null) return@collect
 
                                         val locationPrompt =
                                             promptGenerator.generateObjectLocationPrompt(target)
@@ -404,7 +404,7 @@ class LuminaRepositoryImpl @Inject constructor(
                                         try {
                                             generateSerializedResponse(
                                                 locationPrompt,
-                                                latestFrame.bitmap
+                                                bestFrame.bitmap
                                             )
                                                 .collect { (text, done) ->
                                                     if (text.isNotBlank()) {
@@ -431,10 +431,17 @@ class LuminaRepositoryImpl @Inject constructor(
 
                         val collectorJob = repositoryScope.launch {
                             // Process frames sequentially, not with collectLatest to avoid cancellation
-                            frameFlow.collect { (bitmap, _) ->
+                            frameFlow.collect { (_, _) ->
                                 // Skip if AI is already processing to avoid conflicts
                                 if (isAiOperationInProgress) {
                                     Log.d(TAG, "Skipping frame - AI operation in progress")
+                                    return@collect
+                                }
+
+                                // Get the best quality frame for AI analysis instead of potentially blurred frame
+                                val bestFrame = frameBufferManager.getBestQualityFrame()
+                                if (bestFrame == null) {
+                                    Log.d(TAG, "No quality frame available for analysis")
                                     return@collect
                                 }
 
@@ -444,7 +451,7 @@ class LuminaRepositoryImpl @Inject constructor(
                                     var objectDetected = false
 
                                     // First: Complete the detection phase
-                                    generateSerializedResponse(detectionPrompt, bitmap)
+                                    generateSerializedResponse(detectionPrompt, bestFrame.bitmap)
                                         .collect { (chunk, isDone) ->
                                             fullResponse += chunk
                                             if (isDone) {
@@ -473,7 +480,7 @@ class LuminaRepositoryImpl @Inject constructor(
                                             "Object detected! Starting location description..."
                                         )
 
-                                        generateSerializedResponse(locationPrompt, bitmap)
+                                        generateSerializedResponse(locationPrompt, bestFrame.bitmap)
                                             .collect { (locationChunk, locationDone) ->
                                                 Log.d(
                                                     TAG,
@@ -522,8 +529,8 @@ class LuminaRepositoryImpl @Inject constructor(
                 transientOperationCoordinator.executeTransientOperation("ask_question") {
                     if (!isActive) return@executeTransientOperation
 
-                    val latestFrame = frameBufferManager.getLatestFrame()?.bitmap
-                    if (latestFrame == null) {
+                    val bestFrame = frameBufferManager.getBestQualityFrame()
+                    if (bestFrame == null) {
                         trySend(
                             NavigationCue.InformationalAlert(
                                 "Camera frame not available.",
@@ -535,7 +542,7 @@ class LuminaRepositoryImpl @Inject constructor(
                     }
 
                     val prompt = promptGenerator.generateQuestionAnsweringPrompt(question)
-                    generateSerializedResponse(prompt, latestFrame)
+                    generateSerializedResponse(prompt, bestFrame.bitmap)
                         .collect { (chunk, done) ->
                             trySend(NavigationCue.InformationalAlert(chunk, done))
                             if (done) close()
