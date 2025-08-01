@@ -1,29 +1,28 @@
-package com.lumina.data.repository
+package com.lumina.domain.service
 
-import android.util.Log
-import kotlinx.coroutines.Job
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val TAG = "NavigationModeManager"
-
 /**
- * Manages the lifecycle and state transitions of navigation modes in the Lumina system.
+ * Domain service for managing the lifecycle and state transitions of navigation modes in the Lumina system.
  *
- * This component enforces the single-responsibility principle for mode management,
+ * This service enforces the single-responsibility principle for mode management,
  * ensuring that only one long-running navigation mode is active at any time while
  * properly handling pausing/resuming for transient operations.
  *
  * The system supports:
  * - One primary long-running mode: NAVIGATION (the "Director Pipeline")
  * - Transient operations that temporarily pause the active mode
- * - Proper cleanup and resource management during mode transitions
+ * - Proper state management during mode transitions
+ *
+ * This is pure business logic with no coroutine or Android dependencies, making it
+ * easily testable and independent of implementation details.
  */
 @Singleton
-class NavigationModeManager @Inject constructor() {
+class NavigationModeService @Inject constructor() {
 
     /**
-     * Defines the exclusive, long-running operational modes of the repository.
+     * Defines the exclusive, long-running operational modes of the navigation system.
      * Currently only NAVIGATION is supported as the primary continuous mode.
      */
     enum class OperatingMode {
@@ -40,8 +39,8 @@ class NavigationModeManager @Inject constructor() {
     /** The mode that was paused by a transient operation for later resumption */
     private var pausedMode: OperatingMode? = null
 
-    /** The coroutine job associated with the currently active long-running mode */
-    private var activeJob: Job? = null
+    /** Flag indicating if a mode is currently active */
+    private var isModeActive: Boolean = false
 
     /**
      * Checks if a specific mode is currently active.
@@ -50,7 +49,7 @@ class NavigationModeManager @Inject constructor() {
      * @return true if the specified mode is currently active
      */
     fun isActive(mode: OperatingMode): Boolean {
-        return activeMode == mode && activeJob?.isActive == true
+        return activeMode == mode && isModeActive
     }
 
     /**
@@ -59,30 +58,26 @@ class NavigationModeManager @Inject constructor() {
      * @return true if any long-running mode is currently active
      */
     fun isAnyModeActive(): Boolean {
-        return activeJob?.isActive == true
+        return isModeActive
     }
 
     /**
-     * Starts a new mode with the associated coroutine job.
+     * Starts a new mode.
      *
-     * If another mode is already active, it will be cancelled first.
+     * If another mode is already active, it will be marked as inactive first.
      * This ensures mutual exclusion between different operating modes.
      *
      * @param mode The mode to start
-     * @param job The coroutine job that implements the mode's logic
      */
-    fun startMode(mode: OperatingMode, job: Job) {
-        // Cancel any existing active mode
-        if (activeJob?.isActive == true) {
-            Log.d(TAG, "Cancelling active mode: $activeMode to start new mode: $mode")
-            activeJob?.cancel()
+    fun startMode(mode: OperatingMode) {
+        // Mark any existing active mode as inactive
+        if (isModeActive) {
+            stopActiveMode()
         }
 
         activeMode = mode
-        activeJob = job
+        isModeActive = true
         pausedMode = null // Clear any paused mode since we're starting fresh
-
-        Log.d(TAG, "Started mode: $mode")
     }
 
     /**
@@ -94,18 +89,22 @@ class NavigationModeManager @Inject constructor() {
      * @return true if a mode was paused, false if no mode was active
      */
     fun pauseActiveMode(): Boolean {
-        return if (activeJob?.isActive == true) {
-            Log.d(TAG, "Pausing active mode: $activeMode for transient operation")
+        return if (isModeActive) {
             pausedMode = activeMode
-            activeJob?.cancel()
-            activeJob = null
-            activeMode = null
+            stopActiveMode()
             true
         } else {
-            Log.d(TAG, "No active mode to pause")
             pausedMode = null
             false
         }
+    }
+
+    /**
+     * Stops the currently active mode.
+     */
+    private fun stopActiveMode() {
+        isModeActive = false
+        activeMode = null
     }
 
     /**
@@ -128,15 +127,13 @@ class NavigationModeManager @Inject constructor() {
     }
 
     /**
-     * Stops all modes and cleans up resources.
+     * Stops all modes and cleans up state.
      *
-     * This cancels any active job and clears all state. This is typically
+     * This marks all modes as inactive and clears all state. This is typically
      * called when shutting down the navigation system.
      */
     fun stopAllModes() {
-        Log.d(TAG, "Stopping all modes")
-        activeJob?.cancel()
-        activeJob = null
+        isModeActive = false
         activeMode = null
         pausedMode = null
     }
@@ -147,6 +144,6 @@ class NavigationModeManager @Inject constructor() {
      * @return The active mode, or null if no mode is active
      */
     fun getActiveMode(): OperatingMode? {
-        return if (activeJob?.isActive == true) activeMode else null
+        return if (isModeActive) activeMode else null
     }
 }

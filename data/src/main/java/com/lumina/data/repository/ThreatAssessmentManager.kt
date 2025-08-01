@@ -1,60 +1,23 @@
 package com.lumina.data.repository
 
 import android.util.Log
+import com.lumina.domain.service.ThreatAssessmentService
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "ThreatAssessmentManager"
 
 /**
- * Responsible for analyzing detected objects and determining threat levels and alerting strategies.
+ * Data layer adapter for ThreatAssessmentService that adds logging and data layer concerns.
  *
- * This component implements the core decision-making logic for the Lumina navigation system,
- * determining when and what type of alerts should be triggered based on:
- * - Object threat classification (critical vs. important)
- * - Temporal cooldowns to prevent alert spam
- * - Change detection for new objects in the environment
- *
- * The assessment follows a priority hierarchy:
- * 1. Critical threats (immediate danger) - highest priority
- * 2. New important objects - medium priority
- * 3. Ambient updates - lowest priority
+ * This adapter wraps the pure domain ThreatAssessmentService with data layer concerns
+ * like Android logging. It maintains the clean separation between business logic (domain)
+ * and implementation details (data).
  */
 @Singleton
-class ThreatAssessmentManager @Inject constructor() {
-
-    /**
-     * Objects that pose immediate physical danger and require urgent user attention.
-     * These typically include fast-moving vehicles that could cause injury.
-     */
-    private val criticalObjects = setOf(
-        "car", "truck", "bus", "bicycle", "motorcycle", "train"
-    )
-
-    /**
-     * Objects that are significant for navigation but not immediately dangerous.
-     * These warrant informational alerts when newly detected.
-     */
-    private val importantObjects = setOf(
-        "person", "car", "dog", "cat", "bicycle", "motorcycle", "truck", "bus"
-    )
-
-    /** Minimum time between critical alerts to prevent overwhelming the user */
-    private var lastCriticalAlertTime = 0L
-
-    /** Minimum time between informational alerts to maintain alert quality */
-    private var lastInformationalAlertTime = 0L
-
-    /** Previously detected objects for change detection */
-    private var lastSeenObjects = emptySet<String>()
-
-    companion object {
-        /** Cooldown period for critical alerts in milliseconds */
-        private const val CRITICAL_ALERT_COOLDOWN_MS = 3000L // 3 seconds
-
-        /** Cooldown period for informational alerts in milliseconds */
-        private const val INFORMATIONAL_ALERT_COOLDOWN_MS = 5000L // 5 seconds
-    }
+class ThreatAssessmentManager @Inject constructor(
+    private val threatAssessmentService: ThreatAssessmentService
+) {
 
     /**
      * Assessment result indicating what type of alert (if any) should be triggered.
@@ -76,10 +39,7 @@ class ThreatAssessmentManager @Inject constructor() {
     /**
      * Analyzes the current object detection results and determines what type of alert is needed.
      *
-     * This method implements the core threat assessment logic, considering:
-     * - Object threat classification
-     * - Temporal cooldowns
-     * - Change detection for new objects
+     * This method delegates to the domain service and adds logging for debugging purposes.
      *
      * @param detectedObjects List of object labels detected in the current frame
      * @param currentTime Current system time in milliseconds
@@ -89,66 +49,28 @@ class ThreatAssessmentManager @Inject constructor() {
         detectedObjects: List<String>,
         currentTime: Long
     ): AssessmentResult {
-        val currentObjectLabels = detectedObjects.toSet()
+        val domainResult = threatAssessmentService.assessThreatLevel(detectedObjects, currentTime)
 
-        // Check for critical threats first (highest priority)
-        val criticalObjectsPresent = detectedObjects.any { it in criticalObjects }
-        if (criticalObjectsPresent && shouldTriggerCriticalAlert(currentTime)) {
-            Log.d(
-                TAG,
-                "Critical threat detected: ${detectedObjects.filter { it in criticalObjects }}"
-            )
-            lastCriticalAlertTime = currentTime
-            lastSeenObjects = currentObjectLabels
-            return AssessmentResult.CriticalAlert(detectedObjects.filter { it in criticalObjects })
+        // Convert domain result to data layer result and add logging
+        return when (domainResult) {
+            is ThreatAssessmentService.AssessmentResult.NoAlert -> {
+                AssessmentResult.NoAlert
+            }
+
+            is ThreatAssessmentService.AssessmentResult.CriticalAlert -> {
+                Log.d(TAG, "Critical threat detected: ${domainResult.detectedObjects}")
+                AssessmentResult.CriticalAlert(domainResult.detectedObjects)
+            }
+
+            is ThreatAssessmentService.AssessmentResult.InformationalAlert -> {
+                Log.d(TAG, "New important objects detected: ${domainResult.newObjects}")
+                AssessmentResult.InformationalAlert(domainResult.newObjects)
+            }
+
+            is ThreatAssessmentService.AssessmentResult.AmbientUpdate -> {
+                AssessmentResult.AmbientUpdate
+            }
         }
-
-        // Check for new important objects (medium priority)
-        val newImportantObjects = findNewImportantObjects(currentObjectLabels)
-        if (newImportantObjects.isNotEmpty() && shouldTriggerInformationalAlert(currentTime)) {
-            Log.d(TAG, "New important objects detected: $newImportantObjects")
-            lastInformationalAlertTime = currentTime
-            lastSeenObjects = currentObjectLabels
-            return AssessmentResult.InformationalAlert(newImportantObjects)
-        }
-
-        // Update object tracking even if no alert is triggered
-        lastSeenObjects = currentObjectLabels
-
-        // For now, we don't trigger ambient updates automatically
-        // This could be extended with time-based or distance-based triggers
-        return AssessmentResult.NoAlert
-    }
-
-    /**
-     * Determines if a critical alert should be triggered based on cooldown periods.
-     *
-     * @param currentTime Current system time in milliseconds
-     * @return true if enough time has passed since the last critical alert
-     */
-    private fun shouldTriggerCriticalAlert(currentTime: Long): Boolean {
-        return (currentTime - lastCriticalAlertTime) > CRITICAL_ALERT_COOLDOWN_MS
-    }
-
-    /**
-     * Determines if an informational alert should be triggered based on cooldown periods.
-     *
-     * @param currentTime Current system time in milliseconds
-     * @return true if enough time has passed since the last informational alert
-     */
-    private fun shouldTriggerInformationalAlert(currentTime: Long): Boolean {
-        return (currentTime - lastInformationalAlertTime) > INFORMATIONAL_ALERT_COOLDOWN_MS
-    }
-
-    /**
-     * Identifies newly appeared important objects by comparing current detections with previous state.
-     *
-     * @param currentObjects Set of currently detected object labels
-     * @return List of important objects that weren't present in the last assessment
-     */
-    private fun findNewImportantObjects(currentObjects: Set<String>): List<String> {
-        val newObjects = currentObjects - lastSeenObjects
-        return newObjects.filter { it in importantObjects }
     }
 
     /**
@@ -159,9 +81,7 @@ class ThreatAssessmentManager @Inject constructor() {
      */
     fun reset() {
         Log.d(TAG, "Resetting threat assessment state")
-        lastSeenObjects = emptySet()
-        lastCriticalAlertTime = 0L
-        lastInformationalAlertTime = 0L
+        threatAssessmentService.reset()
     }
 
     /**
@@ -171,7 +91,7 @@ class ThreatAssessmentManager @Inject constructor() {
      * @return true if the object is considered a critical threat
      */
     fun isCriticalObject(objectLabel: String): Boolean {
-        return objectLabel in criticalObjects
+        return threatAssessmentService.isCriticalObject(objectLabel)
     }
 
     /**
@@ -181,6 +101,6 @@ class ThreatAssessmentManager @Inject constructor() {
      * @return true if the object is considered important for navigation
      */
     fun isImportantObject(objectLabel: String): Boolean {
-        return objectLabel in importantObjects
+        return threatAssessmentService.isImportantObject(objectLabel)
     }
 }
