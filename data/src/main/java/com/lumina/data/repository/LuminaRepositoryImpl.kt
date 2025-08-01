@@ -237,7 +237,7 @@ class LuminaRepositoryImpl @Inject constructor(
         activeJob = null
         activeMode = null
         pausedMode = null
-        objectDetectorDataSource.close()
+        objectDetectorDataSource.setPaused(true) // Pause object detection to prevent conflicts
         gemmaDataSource.resetSession()
         frameBuffer.clear()
     }
@@ -256,7 +256,7 @@ class LuminaRepositoryImpl @Inject constructor(
         }
         activeJob = null
         activeMode = null
-        objectDetectorDataSource.close() // Always close detector when no continuous mode is active
+        objectDetectorDataSource.setPaused(true) // Pause object detection to prevent conflicts
     }
 
     /**
@@ -318,6 +318,7 @@ class LuminaRepositoryImpl @Inject constructor(
                 if (!isActive) return@withLock
 
                 if (normalizedTarget in COCO_LABELS) {
+                    objectDetectorDataSource.setPaused(false)
                     // Use fast object detector for known COCO categories
                     val detectionsJob = repositoryScope.launch {
                         objectDetectorDataSource.getDetectionStream(frameFlow)
@@ -615,7 +616,10 @@ class LuminaRepositoryImpl @Inject constructor(
         bitmap: Bitmap
     ): Flow<Pair<String, Boolean>> {
         return aiMutex.withLock {
-            gemmaDataSource.generateResponse(prompt, bitmap)
+            gemmaDataSource.generateResponse(
+                prompt,
+                listOf(TimestampedFrame(bitmap, System.currentTimeMillis()))
+            )
         }
     }
 }

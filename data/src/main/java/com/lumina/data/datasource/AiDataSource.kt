@@ -37,14 +37,6 @@ interface AiDataSource {
         frames: List<TimestampedFrame>
     ): Flow<Pair<String, Boolean>>
 
-    /**
-     * Legacy method for single image analysis. Prefer the multi-frame version for better results.
-     *
-     * @param prompt The prompt to guide the description generation
-     * @param image Single image input to be processed
-     * @return A flow of pairs containing the scene description and completion status
-     */
-    fun generateResponse(prompt: String, image: Bitmap): Flow<Pair<String, Boolean>>
 
     /**
      * Resets the current session, clearing any state or cached data.

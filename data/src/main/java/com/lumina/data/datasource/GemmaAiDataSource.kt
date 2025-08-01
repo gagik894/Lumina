@@ -65,8 +65,6 @@ class GemmaAiDataSource @Inject constructor(
     /** Maximum image dimension for processing to prevent OOM */
     private val maxImageDimension = 512
 
-    var finished = false
-
     private val _initializationState =
         MutableStateFlow<InitializationState>(InitializationState.NotInitialized)
     override val initializationState: StateFlow<InitializationState> =
@@ -194,7 +192,6 @@ class GemmaAiDataSource @Inject constructor(
         }
         try {
             val currentSession = getOrCreateNavigationSession()
-            finished = false
             // Calculate timing information for motion context
             val timeSpanMs = if (frames.size > 1) {
                 frames.last().timestampMs - frames.first().timestampMs
@@ -220,10 +217,6 @@ class GemmaAiDataSource @Inject constructor(
             // Estimate tokens for images (conservative estimate)
             approximateTokenCount += frames.size * 200
 
-            var finished = false
-
-            // Generate response asynchronously with streaming callback
-            val startTime = System.currentTimeMillis()
             val uniqueChunks = mutableSetOf<String>()
 
             currentSession.generateResponseAsync { partialResult, done ->
@@ -232,14 +225,10 @@ class GemmaAiDataSource @Inject constructor(
                 val chunk = partialResult.trim()
                 if (chunk.isNotEmpty()) uniqueChunks.add(chunk)
 
-                // Force-stop conditions: >3 seconds or ≥6 unique chunks
-                val forcedDone =
-                    (System.currentTimeMillis() - startTime > 3_000) || uniqueChunks.size >= 6
 
-                val finalFlag = done || forcedDone
+                val finalFlag = done
 
                 if (finalFlag) {
-                    finished = true
                     approximateTokenCount += estimateTokens(partialResult)
                 }
 
@@ -254,76 +243,9 @@ class GemmaAiDataSource @Inject constructor(
         }
 
         awaitClose {
-            if (!finished) {
-                resetSession()
-            }
             generationMutex.unlock()
         }
     }
-
-    /**
-     * Legacy method for single image analysis.
-     */
-    override fun generateResponse(prompt: String, image: Bitmap): Flow<Pair<String, Boolean>> =
-        callbackFlow {
-            if (!generationMutex.tryLock()) {
-                Log.w(TAG, "Concurrent call to generateResponse detected, ignoring.")
-                channel.close()
-                return@callbackFlow
-            }
-            try {
-                val currentSession = getOrCreateNavigationSession()
-
-                val promptTokens = estimateTokens(prompt)
-                val imageTokens = 200 // Conservative estimate for scaled image
-                approximateTokenCount += promptTokens + imageTokens
-
-                currentSession.addQueryChunk(prompt)
-                val scaledBitmap = scaleImageForProcessing(image)
-                currentSession.addImage(BitmapImageBuilder(scaledBitmap).build())
-
-                // Clean up if we created a new bitmap
-                if (scaledBitmap != image) {
-                    scaledBitmap.recycle()
-                }
-
-                val startTime = System.currentTimeMillis()
-                finished = false
-                val uniqueChunks = mutableSetOf<String>()
-
-                currentSession.generateResponseAsync { partialResult, done ->
-                    Log.d(TAG, "generateResponse: Partial result: $partialResult, Done: $done")
-
-                    val chunk = partialResult.trim()
-                    if (chunk.isNotEmpty()) uniqueChunks.add(chunk)
-
-                    val forcedDone =
-                        (System.currentTimeMillis() - startTime > 3_000) || uniqueChunks.size >= 6
-
-                    val finalFlag = done || forcedDone
-
-                    if (finalFlag) {
-                        finished = true
-                        approximateTokenCount += estimateTokens(partialResult)
-                    }
-
-                    trySend(Pair(partialResult, finalFlag))
-                    if (finalFlag) {
-                        channel.close()
-                    }
-                }
-            } catch (e: Exception) {
-                close(e)
-            }
-
-            awaitClose {
-                if (!finished) {
-                    resetSession()
-                }
-                // keep navigation session
-                generationMutex.unlock()
-            }
-        }
 
     /**
      * Builds a motion-aware prompt that helps the AI understand timing and movement.
