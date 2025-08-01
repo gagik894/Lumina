@@ -6,14 +6,12 @@ import android.util.Log
 import com.lumina.data.datasource.AiDataSource
 import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.data.datasource.TimestampedFrame
-import com.lumina.data.util.FrameSelector
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.repository.LuminaRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -38,24 +36,38 @@ private const val TAG = "LuminaRepositoryImpl"
  * Implementation of [LuminaRepository] that coordinates between AI data sources and object detection
  * to provide intelligent navigation assistance for visually impaired users.
  *
- * This repository implements a state machine to manage different operating modes, ensuring that
- * only one major function (e.g., general navigation, finding an object) is active at any given time.
- * This prevents conflicting operations and resource contention.
+ * This refactored implementation follows the single responsibility principle by delegating
+ * specific concerns to specialized helper classes:
+ * - [FrameBufferManager]: Manages camera frame buffering and motion analysis
+ * - [NavigationModeManager]: Handles navigation mode lifecycle and state transitions
+ * - [ThreatAssessmentManager]: Analyzes detected objects for threat classification
+ * - [PromptGenerator]: Generates contextually appropriate AI prompts
+ * - [AlertCoordinator]: Coordinates alert generation and emission
+ * - [TransientOperationCoordinator]: Manages exclusive execution of user-initiated operations
  *
- * The primary long-running mode is:
- * - **NAVIGATION**: The default mode, providing continuous environmental awareness through the
- *   intelligent "Director Pattern".
+ * The repository now serves as a lightweight orchestrator that maintains the public API
+ * contract while delegating complex logic to specialized components. This design improves
+ * testability, maintainability, and follows Google's recommended architecture patterns.
  *
- * Transient, user-initiated tasks like `findObject`, `askQuestion`, or `startCrossingMode` will
- * temporarily pause the NAVIGATION mode, execute exclusively, and then resume it upon completion.
- *
- * @param gemmaDataSource The AI data source responsible for generating scene descriptions.
- * @param objectDetectorDataSource The data source for detecting objects in camera frames.
+ * @param gemmaDataSource The AI data source responsible for generating scene descriptions
+ * @param objectDetectorDataSource The data source for detecting objects in camera frames
+ * @param frameBufferManager Manages the circular buffer of camera frames
+ * @param navigationModeManager Handles navigation mode lifecycle and transitions
+ * @param threatAssessmentManager Analyzes threats and determines alert priorities
+ * @param promptGenerator Generates contextually appropriate AI prompts
+ * @param alertCoordinator Coordinates alert generation and emission
+ * @param transientOperationCoordinator Manages exclusive execution of transient operations
  */
 @Singleton
 class LuminaRepositoryImpl @Inject constructor(
     private val gemmaDataSource: AiDataSource,
-    private val objectDetectorDataSource: ObjectDetectorDataSource
+    private val objectDetectorDataSource: ObjectDetectorDataSource,
+    private val frameBufferManager: FrameBufferManager,
+    private val navigationModeManager: NavigationModeManager,
+    private val threatAssessmentManager: ThreatAssessmentManager,
+    private val promptGenerator: PromptGenerator,
+    private val alertCoordinator: AlertCoordinator,
+    private val transientOperationCoordinator: TransientOperationCoordinator
 ) : LuminaRepository {
 
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
@@ -64,35 +76,10 @@ class LuminaRepositoryImpl @Inject constructor(
         gemmaDataSource.initializationState
 
     /**
-     * Defines the exclusive, long-running operational mode of the repository.
-     * NAVIGATION is the only long-running mode, which integrates the object detector.
-     */
-    private enum class OperatingMode {
-        NAVIGATION
-    }
-
-    /** The currently active long-running mode. */
-    private var activeMode: OperatingMode? = null
-
-    /** The mode that was paused by a transient operation. */
-    private var pausedMode: OperatingMode? = null
-
-    /** The [Job] associated with the currently active long-running mode. */
-    private var activeJob: Job? = null
-
-    /**
      * A mutex to ensure that all AI generation requests are serialized, preventing the
      * `IllegalStateException` from the underlying AI library.
      */
     private val aiMutex = Mutex()
-
-    /**
-     * A mutex to ensure that transient, user-initiated operations like `findObject` or `askQuestion`
-     * run exclusively and do not conflict with each other. An operation must acquire the lock
-     * before executing and release it upon completion.
-     */
-    private val transientOperationMutex = Mutex()
-
 
     /**
      * Shared flow broadcasting camera frames to multiple collectors.
@@ -103,29 +90,7 @@ class LuminaRepositoryImpl @Inject constructor(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    /** Flow emitting navigation cues to the UI layer */
-    private val navigationCueFlow = MutableSharedFlow<NavigationCue>()
-
-    /** Critical threat objects that require immediate attention */
-    private val criticalObjects = setOf("car", "truck", "bus", "bicycle", "motorcycle", "train")
-
-    /** Important objects that warrant informational alerts when new */
-    private val importantObjects =
-        setOf("person", "car", "dog", "cat", "bicycle", "motorcycle", "truck", "bus")
-
-    /** Timestamps for preventing alert spam */
-    private var lastCriticalAlertTime = 0L
-    private var lastInformationalAlertTime = 0L
-
-    /** Object tracking for change detection */
-    private var lastSeenObjects = emptySet<String>()
-
-    /**
-     * Circular buffer for timestamped frames optimized for motion analysis.
-     * Maintains frames to allow sampling 2 frames ~30 frames apart for optimal motion detection.
-     */
-    private val frameBuffer = ArrayDeque<TimestampedFrame>(35) // Increased to hold more frames
-
+    /** Known COCO object detection labels for fast object detection fallback */
     companion object {
         private val COCO_LABELS = setOf(
             "person",
@@ -216,14 +181,14 @@ class LuminaRepositoryImpl @Inject constructor(
         // This ensures that up-to-date frames are always available for any operation.
         repositoryScope.launch {
             frameFlow.collect { (bitmap, timestamp) ->
-                updateFrameBuffer(bitmap, timestamp)
+                frameBufferManager.addFrame(bitmap, timestamp)
             }
         }
     }
 
     override fun getNavigationCues(): Flow<NavigationCue> {
         startDirectorPipeline()
-        return navigationCueFlow
+        return alertCoordinator.getNavigationCueFlow()
     }
 
     override suspend fun processNewFrame(image: ImageInput) {
@@ -233,65 +198,112 @@ class LuminaRepositoryImpl @Inject constructor(
     }
 
     override fun stopNavigation() {
-        activeJob?.cancel()
-        activeJob = null
-        activeMode = null
-        pausedMode = null
-        objectDetectorDataSource.setPaused(true) // Pause object detection to prevent conflicts
+        navigationModeManager.stopAllModes()
+        objectDetectorDataSource.setPaused(true)
         gemmaDataSource.resetSession()
-        frameBuffer.clear()
+        frameBufferManager.clear()
+        threatAssessmentManager.reset()
     }
 
     /**
-     * Pauses the currently active long-running mode (e.g., NAVIGATION) to allow
-     * a transient operation to run. The paused mode is recorded so it can be resumed later.
+     * Pauses the active navigation mode to allow transient operations to run exclusively.
+     *
+     * This is a simplified wrapper around the navigation mode manager that also
+     * pauses object detection to prevent resource conflicts.
      */
-    private fun pauseActiveMode() {
-        if (activeJob?.isActive == true) {
-            Log.d(TAG, "Pausing active mode: $activeMode")
-            pausedMode = activeMode
-            activeJob?.cancel()
-        } else {
-            pausedMode = null
+    private fun pauseNavigation() {
+        navigationModeManager.pauseActiveMode()
+        objectDetectorDataSource.setPaused(true)
+    }
+
+    /**
+     * Starts the main navigation pipeline (Director Pattern) that provides continuous
+     * environmental awareness through object detection and intelligent alert generation.
+     *
+     * This method integrates all the specialized components to create a coordinated
+     * navigation experience that adapts to environmental changes and threat levels.
+     */
+    private fun startDirectorPipeline() {
+        if (navigationModeManager.isActive(NavigationModeManager.OperatingMode.NAVIGATION)) {
+            return // Already running
         }
-        activeJob = null
-        activeMode = null
-        objectDetectorDataSource.setPaused(true) // Pause object detection to prevent conflicts
-    }
 
-    /**
-     * Resumes the previously paused long-running mode.
-     */
-    private fun resumePausedMode() {
-        if (activeJob?.isActive == true) return // A mode is already running
+        Log.d(TAG, "Starting Director Pipeline (NAVIGATION mode)")
 
-        Log.d(TAG, "Resuming paused mode: $pausedMode")
-        when (pausedMode) {
-            OperatingMode.NAVIGATION -> startDirectorPipeline()
-            null -> {
-                // If no mode was paused, default to starting the main navigation pipeline.
-                Log.d(TAG, "No paused mode found, starting default navigation pipeline.")
-                startDirectorPipeline()
-            }
+        val navigationJob = repositoryScope.launch {
+            objectDetectorDataSource.getDetectionStream(frameFlow)
+                .collectLatest { detectedObjects ->
+                    if (!isActive) return@collectLatest
+
+                    Log.i(TAG, "Detected objects: $detectedObjects")
+                    val currentTime = System.currentTimeMillis()
+
+                    // Assess the threat level and determine appropriate response
+                    val assessment = threatAssessmentManager.assessThreatLevel(
+                        detectedObjects,
+                        currentTime
+                    )
+
+                    // Get motion analysis frames for AI processing
+                    val motionFrames = frameBufferManager.getMotionAnalysisFrames()
+
+                    // Handle the assessment result with appropriate alert coordination
+                    when (assessment) {
+                        is ThreatAssessmentManager.AssessmentResult.CriticalAlert -> {
+                            if (motionFrames.isNotEmpty()) {
+                                alertCoordinator.coordinateCriticalAlert(
+                                    assessment.detectedObjects,
+                                    motionFrames,
+                                    ::generateSerializedResponse
+                                )
+                            }
+                        }
+
+                        is ThreatAssessmentManager.AssessmentResult.InformationalAlert -> {
+                            if (motionFrames.isNotEmpty()) {
+                                alertCoordinator.coordinateInformationalAlert(
+                                    assessment.newObjects,
+                                    motionFrames,
+                                    ::generateSerializedResponse
+                                )
+                            }
+                        }
+
+                        is ThreatAssessmentManager.AssessmentResult.AmbientUpdate -> {
+                            if (motionFrames.isNotEmpty()) {
+                                alertCoordinator.coordinateAmbientUpdate(
+                                    motionFrames,
+                                    ::generateSerializedResponse
+                                )
+                            }
+                        }
+
+                        ThreatAssessmentManager.AssessmentResult.NoAlert -> {
+                            // Continue monitoring without generating alerts
+                        }
+                    }
+                }
         }
-        pausedMode = null
+
+        navigationModeManager.startMode(
+            NavigationModeManager.OperatingMode.NAVIGATION,
+            navigationJob
+        )
     }
 
-    /**
-     * CORRECTED: This now correctly pauses navigation and runs as an exclusive transient operation.
-     */
     override fun describeScene(
         image: ImageInput,
         prompt: String
     ): Flow<NavigationCue> {
-        val flow = callbackFlow {
-            transientOperationMutex.withLock {
-                if (!isActive) return@withLock
+        val flow = callbackFlow<NavigationCue> {
+            transientOperationCoordinator.executeTransientOperation("describe_scene") {
+                if (!isActive) return@executeTransientOperation
 
                 val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                val contextualPrompt = promptGenerator.generateSceneDescriptionPrompt(prompt)
 
                 try {
-                    generateSerializedResponse(prompt, bitmap)
+                    generateSerializedResponse(contextualPrompt, bitmap)
                         .collect { (chunk, done) ->
                             trySend(NavigationCue.InformationalAlert(chunk, done))
                             if (done) close()
@@ -305,21 +317,22 @@ class LuminaRepositoryImpl @Inject constructor(
         }
 
         return flow
-            .onStart { pauseActiveMode() }
-            .onCompletion { resumePausedMode() }
+            .onStart { pauseNavigation() }
+            .onCompletion { resumeNavigation() }
     }
 
 
     override fun findObject(target: String): Flow<NavigationCue> {
         val normalizedTarget = target.trim().lowercase()
 
-        val baseFlow = callbackFlow {
-            transientOperationMutex.withLock {
-                if (!isActive) return@withLock
+        val baseFlow = callbackFlow<NavigationCue> {
+            transientOperationCoordinator.executeTransientOperation("find_object_$target") {
+                if (!isActive) return@executeTransientOperation
 
                 if (normalizedTarget in COCO_LABELS) {
-                    objectDetectorDataSource.setPaused(false)
                     // Use fast object detector for known COCO categories
+                    objectDetectorDataSource.setPaused(false)
+                    
                     val detectionsJob = repositoryScope.launch {
                         objectDetectorDataSource.getDetectionStream(frameFlow)
                             .collectLatest { detections ->
@@ -335,15 +348,19 @@ class LuminaRepositoryImpl @Inject constructor(
                                             false
                                         )
                                     )
-                                    val latestFrame =
-                                        synchronized(frameBuffer) { frameBuffer.lastOrNull() }
+
+                                    val latestFrame = frameBufferManager.getLatestFrame()
                                     if (latestFrame == null) return@collectLatest
 
-                                    val prompt =
-                                        "Describe the location of the $target relative to the user."
+                                    val locationPrompt =
+                                        promptGenerator.generateObjectLocationPrompt(target)
                                     objectDetectorDataSource.setPaused(true)
+
                                     try {
-                                        generateSerializedResponse(prompt, latestFrame.bitmap)
+                                        generateSerializedResponse(
+                                            locationPrompt,
+                                            latestFrame.bitmap
+                                        )
                                             .collect { (text, done) ->
                                                 if (text.isNotBlank()) {
                                                     trySend(
@@ -364,10 +381,9 @@ class LuminaRepositoryImpl @Inject constructor(
                     awaitClose { detectionsJob.cancel() }
                 } else {
                     // Fallback to Gemma vision capabilities for arbitrary objects
-                    val detectionPrompt =
-                        "Answer yes or no only. Do you see a $target in the image?"
-                    val locationPrompt =
-                        "Describe the location of the $target relative to the user."
+                    val detectionPrompt = promptGenerator.generateObjectDetectionPrompt(target)
+                    val locationPrompt = promptGenerator.generateObjectLocationPrompt(target)
+                    
                     val collectorJob = repositoryScope.launch {
                         frameFlow.collectLatest { (bitmap, _) ->
                             val affirmative = generateSerializedResponse(detectionPrompt, bitmap)
@@ -395,23 +411,23 @@ class LuminaRepositoryImpl @Inject constructor(
         }
 
         return baseFlow
-            .onStart { pauseActiveMode() }
-            .onCompletion { resumePausedMode() }
+            .onStart { pauseNavigation() }
+            .onCompletion { resumeNavigation() }
     }
 
     override fun askQuestion(question: String): Flow<NavigationCue> {
-        val flow = callbackFlow {
-            transientOperationMutex.withLock {
-                if (!isActive) return@withLock
+        val flow = callbackFlow<NavigationCue> {
+            transientOperationCoordinator.executeTransientOperation("ask_question") {
+                if (!isActive) return@executeTransientOperation
 
-                val latestFrame = synchronized(frameBuffer) { frameBuffer.lastOrNull()?.bitmap }
+                val latestFrame = frameBufferManager.getLatestFrame()?.bitmap
                 if (latestFrame == null) {
                     trySend(NavigationCue.InformationalAlert("Camera frame not available.", true))
                     close()
-                    return@withLock
+                    return@executeTransientOperation
                 }
 
-                val prompt = "Based on the image, answer the user's question: $question"
+                val prompt = promptGenerator.generateQuestionAnsweringPrompt(question)
                 generateSerializedResponse(prompt, latestFrame)
                     .collect { (chunk, done) ->
                         trySend(NavigationCue.InformationalAlert(chunk, done))
@@ -422,168 +438,30 @@ class LuminaRepositoryImpl @Inject constructor(
         }
 
         return flow
-            .onStart { pauseActiveMode() }
-            .onCompletion { resumePausedMode() }
-    }
-
-    private fun startDirectorPipeline() {
-        if (activeMode == OperatingMode.NAVIGATION) return // Already in this mode
-        Log.d(TAG, "Starting Director Pipeline (NAVIGATION mode)")
-
-        activeJob?.cancel() // Cancel any other active mode
-        activeMode = OperatingMode.NAVIGATION
-        activeJob = repositoryScope.launch {
-            objectDetectorDataSource.getDetectionStream(frameFlow)
-                .collectLatest { detectedObjects ->
-                    if (!isActive) return@collectLatest
-
-                    Log.i(TAG, "Detected objects: $detectedObjects")
-                    val currentTime = System.currentTimeMillis()
-                    val currentObjectLabels = detectedObjects.toSet()
-                    val motionFrames = getMotionAnalysisFrames()
-
-                    if (checkCriticalThreats(detectedObjects, currentTime)) {
-                        if (motionFrames.isNotEmpty()) triggerCriticalAlert(motionFrames)
-                        lastSeenObjects = currentObjectLabels
-                        return@collectLatest
-                    }
-
-                    val newImportantObjects = findNewImportantObjects(currentObjectLabels)
-                    if (newImportantObjects.isNotEmpty() && (currentTime - lastInformationalAlertTime) > 5000) {
-                        if (motionFrames.isNotEmpty()) triggerInformationalAlert(
-                            motionFrames,
-                            newImportantObjects
-                        )
-                        lastInformationalAlertTime = currentTime
-                        lastSeenObjects = currentObjectLabels
-                        return@collectLatest
-                    }
-
-                    lastSeenObjects = currentObjectLabels
-                }
-        }
-    }
-
-    private fun updateFrameBuffer(bitmap: Bitmap, timestamp: Long) {
-        synchronized(frameBuffer) {
-            frameBuffer.add(TimestampedFrame(bitmap, timestamp))
-            if (frameBuffer.size > 35) {
-                frameBuffer.removeFirst()
-            }
-        }
-    }
-
-    private fun getMotionAnalysisFrames(): List<TimestampedFrame> {
-        synchronized(frameBuffer) {
-            return FrameSelector.selectMotionFrames(frameBuffer.toList())
-        }
-    }
-
-    private fun checkCriticalThreats(detectedObjects: List<String>, currentTime: Long): Boolean {
-        val criticalObjectsPresent = detectedObjects.any { it in criticalObjects }
-
-        if (criticalObjectsPresent && (currentTime - lastCriticalAlertTime) > 3000) { // 3-second cooldown
-            lastCriticalAlertTime = currentTime
-            return true
-        }
-
-        return false
-    }
-
-    private fun findNewImportantObjects(currentObjects: Set<String>): List<String> {
-        val newObjects = currentObjects - lastSeenObjects
-        return newObjects.filter { it in importantObjects }
-    }
-
-    private suspend fun triggerCriticalAlert(frames: List<TimestampedFrame>) {
-        val prompt = "IMMEDIATE OBSTACLE. NAME IT IN 3 WORDS."
-        Log.i(TAG, "triggerCriticalAlert: ")
-        objectDetectorDataSource.setPaused(true)
-        try {
-            generateSerializedResponse(prompt, frames)
-                .collect { (partialResponse, isDone) ->
-                    val criticalAlert = NavigationCue.CriticalAlert(partialResponse, isDone)
-                    navigationCueFlow.emit(criticalAlert)
-                }
-        } finally {
-            objectDetectorDataSource.setPaused(false)
-        }
-    }
-
-    private suspend fun triggerInformationalAlert(
-        frames: List<TimestampedFrame>,
-        newObjects: List<String>
-    ) {
-        Log.i(TAG, "triggerInformationalAlert: ")
-        val objectContext = if (newObjects.isNotEmpty()) {
-            " A new ${newObjects.first()} has appeared."
-        } else {
-            ""
-        }
-
-        val prompt = "fast describe image, just most important for a blind.$objectContext"
-
-        objectDetectorDataSource.setPaused(true)
-        try {
-            generateSerializedResponse(prompt, frames)
-                .collect { (partialResponse, isDone) ->
-                    val informationalAlert =
-                        NavigationCue.InformationalAlert(partialResponse, isDone)
-                    navigationCueFlow.emit(informationalAlert)
-                }
-        } finally {
-            objectDetectorDataSource.setPaused(false)
-        }
-    }
-
-    private suspend fun triggerAmbientUpdate(frames: List<TimestampedFrame>) {
-        val prompt = "Briefly describe the general surroundings for a blind user."
-        Log.i(TAG, "triggerAmbientUpdate: ")
-        objectDetectorDataSource.setPaused(true)
-        try {
-            generateSerializedResponse(prompt, frames)
-                .collect { (partialResponse, isDone) ->
-                    val ambientUpdate = NavigationCue.AmbientUpdate(partialResponse, isDone)
-                    navigationCueFlow.emit(ambientUpdate)
-                }
-        } finally {
-            objectDetectorDataSource.setPaused(false)
-        }
-
+            .onStart { pauseNavigation() }
+            .onCompletion { resumeNavigation() }
     }
 
     override fun startCrossingMode(): Flow<NavigationCue> {
-        val flow = callbackFlow {
-            transientOperationMutex.withLock {
-                if (!isActive) return@withLock
+        val flow = callbackFlow<NavigationCue> {
+            transientOperationCoordinator.executeTransientOperation("crossing_mode") {
+                if (!isActive) return@executeTransientOperation
 
                 Log.d(TAG, "Starting transient CROSSING operation")
                 val crossingJob = repositoryScope.launch {
                     frameFlow.collectLatest {
-                        val frames = getMotionAnalysisFrames()
+                        val frames = frameBufferManager.getMotionAnalysisFrames()
                         if (frames.isEmpty()) return@collectLatest
 
-                        val prompt = """
-                        You are in CROSSING MODE. Guide the user with WAIT, CROSS, or ADJUST LEFT/RIGHT in <=3 words.
-                        IMPORTANT: Once you determine the user has safely crossed the street, you MUST respond with the exact phrase 'CROSSING COMPLETE' and nothing else.
-                        """.trimIndent()
-
                         try {
-                            generateSerializedResponse(prompt, frames)
-                                .collect { (chunk, done) ->
-                                    if (chunk.contains("CROSSING COMPLETE", ignoreCase = true)) {
-                                        Log.i(TAG, "Crossing complete signal received from AI.")
-                                        trySend(
-                                            NavigationCue.InformationalAlert(
-                                                "Crossing complete.",
-                                                true
-                                            )
-                                        )
-                                        this@callbackFlow.close() // Close the flow to stop the operation.
-                                    } else if (chunk.isNotBlank()) {
-                                        trySend(NavigationCue.CriticalAlert(chunk, done))
-                                    }
-                                }
+                            alertCoordinator.coordinateCrossingGuidance(
+                                frames,
+                                ::generateSerializedResponse
+                            ) {
+                                // Crossing complete callback
+                                Log.i(TAG, "Crossing complete signal received")
+                                this@callbackFlow.close()
+                            }
                         } catch (e: Exception) {
                             Log.e(TAG, "Error during crossing guidance", e)
                             this@callbackFlow.close(e)
@@ -598,19 +476,44 @@ class LuminaRepositoryImpl @Inject constructor(
         }
 
         return flow
-            .onStart { pauseActiveMode() }
-            .onCompletion { resumePausedMode() }
+            .onStart { pauseNavigation() }
+            .onCompletion { resumeNavigation() }
     }
 
-    private suspend fun generateSerializedResponse(
-        prompt: String,
-        frames: List<TimestampedFrame>
-    ): Flow<Pair<String, Boolean>> {
-        return aiMutex.withLock {
-            gemmaDataSource.generateResponse(prompt, frames)
+
+    /**
+     * Resumes the previously paused navigation mode after a transient operation completes.
+     *
+     * This method determines what mode should be resumed and restarts it appropriately.
+     */
+    private fun resumeNavigation() {
+        val pausedMode = navigationModeManager.getPausedMode()
+
+        when (pausedMode) {
+            NavigationModeManager.OperatingMode.NAVIGATION -> {
+                startDirectorPipeline()
+            }
+
+            null -> {
+                // If no mode was paused, default to starting the main navigation pipeline
+                Log.d(TAG, "No paused mode found, starting default navigation pipeline")
+                startDirectorPipeline()
+            }
         }
+
+        navigationModeManager.clearPausedMode()
     }
 
+    /**
+     * Generates AI responses with proper serialization to prevent concurrent access issues.
+     *
+     * This method wraps the AI data source call with mutex protection and converts
+     * single frames to the expected list format.
+     *
+     * @param prompt The prompt for AI generation
+     * @param bitmap Single frame for analysis
+     * @return Flow of partial responses with completion status
+     */
     private suspend fun generateSerializedResponse(
         prompt: String,
         bitmap: Bitmap
@@ -620,6 +523,25 @@ class LuminaRepositoryImpl @Inject constructor(
                 prompt,
                 listOf(TimestampedFrame(bitmap, System.currentTimeMillis()))
             )
+        }
+    }
+
+    /**
+     * Generates AI responses with proper serialization for multiple frames.
+     *
+     * This method wraps the AI data source call with mutex protection for
+     * motion analysis scenarios that require multiple frames.
+     *
+     * @param prompt The prompt for AI generation
+     * @param frames Multiple frames for motion analysis
+     * @return Flow of partial responses with completion status
+     */
+    private suspend fun generateSerializedResponse(
+        prompt: String,
+        frames: List<TimestampedFrame>
+    ): Flow<Pair<String, Boolean>> {
+        return aiMutex.withLock {
+            gemmaDataSource.generateResponse(prompt, frames)
         }
     }
 }
