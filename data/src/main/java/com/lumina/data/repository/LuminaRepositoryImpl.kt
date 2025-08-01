@@ -19,10 +19,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -80,6 +76,13 @@ class LuminaRepositoryImpl @Inject constructor(
      * `IllegalStateException` from the underlying AI library.
      */
     private val aiMutex = Mutex()
+
+    /**
+     * Flag to indicate if an AI operation is currently in progress.
+     * This helps coordinate between navigation pipeline and transient operations.
+     */
+    @Volatile
+    private var isAiOperationInProgress = false
 
     /**
      * Shared flow broadcasting camera frames to multiple collectors.
@@ -211,9 +214,38 @@ class LuminaRepositoryImpl @Inject constructor(
      * This is a simplified wrapper around the navigation mode manager that also
      * pauses object detection to prevent resource conflicts.
      */
-    private fun pauseNavigation() {
+    private suspend fun pauseNavigation() {
         navigationModeManager.pauseActiveMode()
         objectDetectorDataSource.setPaused(true)
+
+        // Wait for any ongoing AI operations to complete before proceeding
+        // This prevents the "Previous invocation still processing" error
+        waitForAiOperationToComplete()
+    }
+
+    /**
+     * Waits for any ongoing AI operation to complete before proceeding.
+     * This prevents concurrent AI requests that cause IllegalStateException.
+     */
+    private suspend fun waitForAiOperationToComplete() {
+        if (isAiOperationInProgress) {
+            Log.d(TAG, "Waiting for ongoing AI operation to complete...")
+        }
+
+        // Wait up to 10 seconds for ongoing AI operations to complete
+        var attempts = 0
+        while (isAiOperationInProgress && attempts < 100) {
+            kotlinx.coroutines.delay(100) // Wait 100ms
+            attempts++
+        }
+
+        if (isAiOperationInProgress) {
+            Log.w(TAG, "AI operation still in progress after waiting 10 seconds, proceeding anyway")
+            // Force reset the flag to prevent permanent blocking
+            isAiOperationInProgress = false
+        } else if (attempts > 0) {
+            Log.d(TAG, "AI operation completed after waiting ${attempts * 100}ms")
+        }
     }
 
     /**
@@ -295,189 +327,272 @@ class LuminaRepositoryImpl @Inject constructor(
         image: ImageInput,
         prompt: String
     ): Flow<NavigationCue> {
-        val flow = callbackFlow<NavigationCue> {
-            transientOperationCoordinator.executeTransientOperation("describe_scene") {
-                if (!isActive) return@executeTransientOperation
+        return callbackFlow<NavigationCue> {
+            // Pause navigation first to prevent AI conflicts
+            pauseNavigation()
 
-                val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
-                val contextualPrompt = promptGenerator.generateSceneDescriptionPrompt(prompt)
+            try {
+                transientOperationCoordinator.executeTransientOperation("describe_scene") {
+                    if (!isActive) return@executeTransientOperation
 
-                try {
-                    generateSerializedResponse(contextualPrompt, bitmap)
-                        .collect { (chunk, done) ->
-                            trySend(NavigationCue.InformationalAlert(chunk, done))
-                            if (done) close()
-                        }
-                } finally {
-                    // Ensure bitmap is recycled even on error or cancellation
-                    bitmap.recycle()
+                    val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+                    val contextualPrompt = promptGenerator.generateSceneDescriptionPrompt(prompt)
+
+                    try {
+                        generateSerializedResponse(contextualPrompt, bitmap)
+                            .collect { (chunk, done) ->
+                                trySend(NavigationCue.InformationalAlert(chunk, done))
+                                if (done) close()
+                            }
+                    } finally {
+                        // Ensure bitmap is recycled even on error or cancellation
+                        bitmap.recycle()
+                    }
                 }
+            } finally {
+                resumeNavigation()
             }
             awaitClose { }
         }
-
-        return flow
-            .onStart { pauseNavigation() }
-            .onCompletion { resumeNavigation() }
     }
 
 
     override fun findObject(target: String): Flow<NavigationCue> {
         val normalizedTarget = target.trim().lowercase()
 
-        val baseFlow = callbackFlow<NavigationCue> {
-            transientOperationCoordinator.executeTransientOperation("find_object_$target") {
-                if (!isActive) return@executeTransientOperation
+        return callbackFlow<NavigationCue> {
+            // Pause navigation first to prevent AI conflicts
+            pauseNavigation()
 
-                if (normalizedTarget in COCO_LABELS) {
-                    // Use fast object detector for known COCO categories
-                    objectDetectorDataSource.setPaused(false)
-                    
-                    val detectionsJob = repositoryScope.launch {
-                        objectDetectorDataSource.getDetectionStream(frameFlow)
-                            .collectLatest { detections ->
-                                if (detections.any {
-                                        it.equals(
-                                            normalizedTarget,
-                                            ignoreCase = true
+            try {
+                transientOperationCoordinator.executeTransientOperation("find_object_$target") {
+                    if (!isActive) return@executeTransientOperation
+
+                    if (normalizedTarget in COCO_LABELS) {
+                        // Use fast object detector for known COCO categories
+                        objectDetectorDataSource.setPaused(false)
+
+                        val detectionsJob = repositoryScope.launch {
+                            objectDetectorDataSource.getDetectionStream(frameFlow)
+                                .collect { detections ->
+                                    // Skip if AI is already processing to avoid conflicts
+                                    if (isAiOperationInProgress) {
+                                        Log.d(TAG, "Skipping detection - AI operation in progress")
+                                        return@collect
+                                    }
+
+                                    if (detections.any {
+                                            it.equals(
+                                                normalizedTarget,
+                                                ignoreCase = true
+                                            )
+                                        }) {
+                                        trySend(
+                                            NavigationCue.InformationalAlert(
+                                                "$target detected",
+                                                false
+                                            )
                                         )
-                                    }) {
-                                    trySend(
-                                        NavigationCue.InformationalAlert(
-                                            "$target detected",
-                                            false
+
+                                        val latestFrame = frameBufferManager.getLatestFrame()
+                                        if (latestFrame == null) return@collect
+
+                                        val locationPrompt =
+                                            promptGenerator.generateObjectLocationPrompt(target)
+                                        objectDetectorDataSource.setPaused(true)
+
+                                        try {
+                                            generateSerializedResponse(
+                                                locationPrompt,
+                                                latestFrame.bitmap
+                                            )
+                                                .collect { (text, done) ->
+                                                    if (text.isNotBlank()) {
+                                                        trySend(
+                                                            NavigationCue.InformationalAlert(
+                                                                text,
+                                                                done
+                                                            )
+                                                        )
+                                                    }
+                                                    if (done) this@callbackFlow.close()
+                                                }
+                                        } finally {
+                                            objectDetectorDataSource.setPaused(false)
+                                        }
+                                    }
+                                }
+                        }
+                        awaitClose { detectionsJob.cancel() }
+                    } else {
+                        // Fallback to Gemma vision capabilities for arbitrary objects
+                        val detectionPrompt = promptGenerator.generateObjectDetectionPrompt(target)
+                        val locationPrompt = promptGenerator.generateObjectLocationPrompt(target)
+
+                        val collectorJob = repositoryScope.launch {
+                            // Process frames sequentially, not with collectLatest to avoid cancellation
+                            frameFlow.collect { (bitmap, _) ->
+                                // Skip if AI is already processing to avoid conflicts
+                                if (isAiOperationInProgress) {
+                                    Log.d(TAG, "Skipping frame - AI operation in progress")
+                                    return@collect
+                                }
+
+                                try {
+                                    // Wait for the complete detection response before proceeding
+                                    var fullResponse = ""
+                                    var objectDetected = false
+
+                                    // First: Complete the detection phase
+                                    generateSerializedResponse(detectionPrompt, bitmap)
+                                        .collect { (chunk, isDone) ->
+                                            fullResponse += chunk
+                                            if (isDone) {
+                                                objectDetected = fullResponse
+                                                    .trim()
+                                                    .lowercase()
+                                                    .startsWith("y")
+
+                                                Log.d(
+                                                    TAG,
+                                                    "Detection phase complete. Object detected: $objectDetected"
+                                                )
+                                            }
+                                        }
+
+                                    // Second: If detected, proceed with location description
+                                    if (objectDetected) {
+                                        trySend(
+                                            NavigationCue.InformationalAlert(
+                                                "$target detected",
+                                                false
+                                            )
                                         )
-                                    )
-
-                                    val latestFrame = frameBufferManager.getLatestFrame()
-                                    if (latestFrame == null) return@collectLatest
-
-                                    val locationPrompt =
-                                        promptGenerator.generateObjectLocationPrompt(target)
-                                    objectDetectorDataSource.setPaused(true)
-
-                                    try {
-                                        generateSerializedResponse(
-                                            locationPrompt,
-                                            latestFrame.bitmap
+                                        Log.d(
+                                            TAG,
+                                            "Object detected! Starting location description..."
                                         )
-                                            .collect { (text, done) ->
-                                                if (text.isNotBlank()) {
+
+                                        generateSerializedResponse(locationPrompt, bitmap)
+                                            .collect { (locationChunk, locationDone) ->
+                                                Log.d(
+                                                    TAG,
+                                                    "Location chunk: '$locationChunk', done: $locationDone"
+                                                )
+                                                if (locationChunk.isNotBlank()) {
                                                     trySend(
                                                         NavigationCue.InformationalAlert(
-                                                            text,
-                                                            done
+                                                            locationChunk,
+                                                            locationDone
                                                         )
                                                     )
                                                 }
-                                                if (done) this@callbackFlow.close()
+                                                if (locationDone) {
+                                                    Log.d(
+                                                        TAG,
+                                                        "Location description complete, closing flow"
+                                                    )
+                                                    this@callbackFlow.close()
+                                                }
                                             }
-                                    } finally {
-                                        objectDetectorDataSource.setPaused(false)
+                                    } else {
+                                        Log.d(TAG, "Object not detected in frame, continuing...")
                                     }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error during object detection", e)
+                                    // Continue processing instead of failing completely
                                 }
                             }
-                    }
-                    awaitClose { detectionsJob.cancel() }
-                } else {
-                    // Fallback to Gemma vision capabilities for arbitrary objects
-                    val detectionPrompt = promptGenerator.generateObjectDetectionPrompt(target)
-                    val locationPrompt = promptGenerator.generateObjectLocationPrompt(target)
-                    
-                    val collectorJob = repositoryScope.launch {
-                        frameFlow.collectLatest { (bitmap, _) ->
-                            val affirmative = generateSerializedResponse(detectionPrompt, bitmap)
-                                .map { it.first }
-                                .first()
-                                .trim()
-                                .lowercase()
-                                .startsWith("y")
-
-                            if (affirmative) {
-                                trySend(NavigationCue.InformationalAlert("$target detected", false))
-                                generateSerializedResponse(locationPrompt, bitmap)
-                                    .collect { (chunk, done) ->
-                                        if (chunk.isNotBlank()) {
-                                            trySend(NavigationCue.InformationalAlert(chunk, done))
-                                        }
-                                        if (done) this@callbackFlow.close()
-                                    }
-                            }
                         }
+                        awaitClose { collectorJob.cancel() }
                     }
-                    awaitClose { collectorJob.cancel() }
                 }
+            } finally {
+                resumeNavigation()
             }
         }
-
-        return baseFlow
-            .onStart { pauseNavigation() }
-            .onCompletion { resumeNavigation() }
     }
 
     override fun askQuestion(question: String): Flow<NavigationCue> {
-        val flow = callbackFlow<NavigationCue> {
-            transientOperationCoordinator.executeTransientOperation("ask_question") {
-                if (!isActive) return@executeTransientOperation
+        return callbackFlow<NavigationCue> {
+            // Pause navigation first to prevent AI conflicts
+            pauseNavigation()
 
-                val latestFrame = frameBufferManager.getLatestFrame()?.bitmap
-                if (latestFrame == null) {
-                    trySend(NavigationCue.InformationalAlert("Camera frame not available.", true))
-                    close()
-                    return@executeTransientOperation
-                }
+            try {
+                transientOperationCoordinator.executeTransientOperation("ask_question") {
+                    if (!isActive) return@executeTransientOperation
 
-                val prompt = promptGenerator.generateQuestionAnsweringPrompt(question)
-                generateSerializedResponse(prompt, latestFrame)
-                    .collect { (chunk, done) ->
-                        trySend(NavigationCue.InformationalAlert(chunk, done))
-                        if (done) close()
+                    val latestFrame = frameBufferManager.getLatestFrame()?.bitmap
+                    if (latestFrame == null) {
+                        trySend(
+                            NavigationCue.InformationalAlert(
+                                "Camera frame not available.",
+                                true
+                            )
+                        )
+                        close()
+                        return@executeTransientOperation
                     }
+
+                    val prompt = promptGenerator.generateQuestionAnsweringPrompt(question)
+                    generateSerializedResponse(prompt, latestFrame)
+                        .collect { (chunk, done) ->
+                            trySend(NavigationCue.InformationalAlert(chunk, done))
+                            if (done) close()
+                        }
+                }
+            } finally {
+                resumeNavigation()
             }
             awaitClose { }
         }
-
-        return flow
-            .onStart { pauseNavigation() }
-            .onCompletion { resumeNavigation() }
     }
 
     override fun startCrossingMode(): Flow<NavigationCue> {
-        val flow = callbackFlow<NavigationCue> {
-            transientOperationCoordinator.executeTransientOperation("crossing_mode") {
-                if (!isActive) return@executeTransientOperation
+        return callbackFlow<NavigationCue> {
+            // Pause navigation first to prevent AI conflicts
+            pauseNavigation()
 
-                Log.d(TAG, "Starting transient CROSSING operation")
-                val crossingJob = repositoryScope.launch {
-                    frameFlow.collectLatest {
-                        val frames = frameBufferManager.getMotionAnalysisFrames()
-                        if (frames.isEmpty()) return@collectLatest
+            try {
+                transientOperationCoordinator.executeTransientOperation("crossing_mode") {
+                    if (!isActive) return@executeTransientOperation
 
-                        try {
-                            alertCoordinator.coordinateCrossingGuidance(
-                                frames,
-                                ::generateSerializedResponse
-                            ) {
-                                // Crossing complete callback
-                                Log.i(TAG, "Crossing complete signal received")
-                                this@callbackFlow.close()
+                    Log.d(TAG, "Starting transient CROSSING operation")
+                    val crossingJob = repositoryScope.launch {
+                        frameFlow.collect {
+                            // Skip if AI is already processing to avoid conflicts
+                            if (isAiOperationInProgress) {
+                                Log.d(TAG, "Skipping frame - AI operation in progress for crossing")
+                                return@collect
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error during crossing guidance", e)
-                            this@callbackFlow.close(e)
+
+                            val frames = frameBufferManager.getMotionAnalysisFrames()
+                            if (frames.isEmpty()) return@collect
+
+                            try {
+                                alertCoordinator.coordinateCrossingGuidance(
+                                    frames,
+                                    ::generateSerializedResponse
+                                ) {
+                                    // Crossing complete callback
+                                    Log.i(TAG, "Crossing complete signal received")
+                                    this@callbackFlow.close()
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error during crossing guidance", e)
+                                this@callbackFlow.close(e)
+                            }
                         }
                     }
+                    awaitClose {
+                        Log.d(TAG, "Closing transient CROSSING operation.")
+                        crossingJob.cancel()
+                    }
                 }
-                awaitClose {
-                    Log.d(TAG, "Closing transient CROSSING operation.")
-                    crossingJob.cancel()
-                }
+            } finally {
+                resumeNavigation()
             }
         }
-
-        return flow
-            .onStart { pauseNavigation() }
-            .onCompletion { resumeNavigation() }
     }
 
 
@@ -517,12 +632,26 @@ class LuminaRepositoryImpl @Inject constructor(
     private suspend fun generateSerializedResponse(
         prompt: String,
         bitmap: Bitmap
-    ): Flow<Pair<String, Boolean>> {
-        return aiMutex.withLock {
-            gemmaDataSource.generateResponse(
-                prompt,
-                listOf(TimestampedFrame(bitmap, System.currentTimeMillis()))
-            )
+    ): Flow<Pair<String, Boolean>> = kotlinx.coroutines.flow.flow {
+        aiMutex.withLock {
+            Log.d(TAG, "Starting AI operation with prompt: ${prompt.take(50)}...")
+            isAiOperationInProgress = true
+            try {
+                gemmaDataSource.generateResponse(
+                    prompt,
+                    listOf(TimestampedFrame(bitmap, System.currentTimeMillis()))
+                ).collect { (chunk, isDone) ->
+                    emit(Pair(chunk, isDone))
+                    if (isDone) {
+                        Log.d(TAG, "AI operation completed")
+                        isAiOperationInProgress = false
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "AI operation failed", e)
+                isAiOperationInProgress = false
+                throw e
+            }
         }
     }
 
@@ -539,9 +668,23 @@ class LuminaRepositoryImpl @Inject constructor(
     private suspend fun generateSerializedResponse(
         prompt: String,
         frames: List<TimestampedFrame>
-    ): Flow<Pair<String, Boolean>> {
-        return aiMutex.withLock {
-            gemmaDataSource.generateResponse(prompt, frames)
+    ): Flow<Pair<String, Boolean>> = kotlinx.coroutines.flow.flow {
+        aiMutex.withLock {
+            Log.d(TAG, "Starting AI operation with prompt: ${prompt.take(50)}...")
+            isAiOperationInProgress = true
+            try {
+                gemmaDataSource.generateResponse(prompt, frames).collect { (chunk, isDone) ->
+                    emit(Pair(chunk, isDone))
+                    if (isDone) {
+                        Log.d(TAG, "AI operation completed")
+                        isAiOperationInProgress = false
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "AI operation failed", e)
+                isAiOperationInProgress = false
+                throw e
+            }
         }
     }
 }
