@@ -6,8 +6,10 @@ import com.lumina.data.datasource.MediaPipeObjectDetector
 import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.data.repository.LuminaRepositoryImpl
 import com.lumina.domain.repository.LuminaRepository
+import com.lumina.domain.service.NavigationModeService
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
@@ -45,4 +47,17 @@ abstract class DataModule {
     abstract fun bindObjectDetectorDataSource(
         mediaPipeObjectDetector: MediaPipeObjectDetector
     ): ObjectDetectorDataSource
+
+    companion object {
+        /**
+         * Provides the NavigationModeService as a singleton.
+         * This keeps the domain layer pure while enabling dependency injection.
+         */
+        @Provides
+        @Singleton
+        @JvmStatic
+        fun provideNavigationModeService(): NavigationModeService {
+            return NavigationModeService()
+        }
+    }
 }

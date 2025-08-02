@@ -53,8 +53,9 @@ class TransientOperationCoordinator @Inject constructor(
         return transientOperationMutex.withLock {
             Log.d(TAG, "Starting transient operation: $operationName")
 
-            // Stop any active mode before starting a new transient operation
-            navigationModeManager.stopAllModes()
+            // Cancel any active modes before starting a new transient operation
+            // but don't reset AI session/clear frame buffer yet - let them finish cleanup
+            navigationModeManager.cancelActiveModes()
 
             try {
                 // Execute the actual operation
@@ -68,6 +69,7 @@ class TransientOperationCoordinator @Inject constructor(
 
             } finally {
                 // Always stop all modes and clear resources after the operation
+                // This is where we reset the AI session and clear frame buffer
                 navigationModeManager.stopAllModes()
             }
         }

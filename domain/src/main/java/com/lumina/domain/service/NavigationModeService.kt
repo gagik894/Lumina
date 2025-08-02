@@ -1,8 +1,5 @@
 package com.lumina.domain.service
 
-import javax.inject.Inject
-import javax.inject.Singleton
-
 /**
  * Domain service for managing navigation mode lifecycle and state transitions.
  *
@@ -15,8 +12,7 @@ import javax.inject.Singleton
  * - Transient operations that temporarily pause the active mode
  * - Proper state management during mode transitions
  */
-@Singleton
-class NavigationModeService @Inject constructor() {
+class NavigationModeService {
 
     /**
      * Defines the exclusive, long-running operational modes of the navigation system.

@@ -54,10 +54,10 @@ class NavigationModeManager @Inject constructor(
      * @param job The coroutine job that implements the mode's logic
      */
     fun startMode(mode: NavigationModeService.OperatingMode, job: Job) {
-        // Cancel any existing active mode
+        // Cancel any existing active mode without full cleanup
         if (activeJob?.isActive == true) {
             Log.d(TAG, "Cancelling active mode to start new mode: $mode")
-            activeJob?.cancel()
+            cancelActiveJobsOnly()
         }
 
         navigationModeService.startMode(mode)
@@ -79,6 +79,27 @@ class NavigationModeManager @Inject constructor(
         navigationModeService.stopAllModes()
         frameBufferManager.clear()
         aiOperationHelper.reset()
+    }
+
+    /**
+     * Cancels active jobs without full resource cleanup.
+     *
+     * This is used when starting new operations - we want to cancel
+     * running jobs but not reset AI session/frame buffer yet to allow
+     * proper cleanup time.
+     */
+    fun cancelActiveModes() {
+        Log.d(TAG, "Cancelling active modes without full cleanup")
+        cancelActiveJobsOnly()
+    }
+
+    /**
+     * Private helper to cancel jobs without cleanup.
+     */
+    private fun cancelActiveJobsOnly() {
+        activeJob?.cancel()
+        activeJob = null
+        navigationModeService.stopAllModes()
     }
 
     /**
