@@ -1,7 +1,6 @@
 package com.lumina.data.repository
 
 import android.util.Log
-import com.lumina.domain.service.NavigationModeService
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -54,8 +53,8 @@ class TransientOperationCoordinator @Inject constructor(
         return transientOperationMutex.withLock {
             Log.d(TAG, "Starting transient operation: $operationName")
 
-            // Pause the active navigation mode to prevent conflicts
-            val wasPaused = navigationModeManager.pauseActiveMode()
+            // Stop any active mode before starting a new transient operation
+            navigationModeManager.stopAllModes()
 
             try {
                 // Execute the actual operation
@@ -68,10 +67,8 @@ class TransientOperationCoordinator @Inject constructor(
                 throw e
 
             } finally {
-                // Always attempt to resume the paused mode, even if operation failed
-                if (wasPaused) {
-                    resumePausedNavigationMode()
-                }
+                // Always stop all modes and clear resources after the operation
+                navigationModeManager.stopAllModes()
             }
         }
     }
@@ -96,22 +93,8 @@ class TransientOperationCoordinator @Inject constructor(
      * starting the main navigation pipeline.
      */
     private fun resumePausedNavigationMode() {
-        val pausedMode = navigationModeManager.getPausedMode()
-
-        when (pausedMode) {
-            NavigationModeService.OperatingMode.NAVIGATION -> {
-                Log.d(TAG, "Resuming navigation mode after transient operation")
-                // The actual mode resumption will be handled by the repository
-                // This coordinator just manages the lifecycle
-                navigationModeManager.clearPausedMode()
-            }
-
-            null -> {
-                Log.d(TAG, "No paused mode found after transient operation")
-                // If no mode was paused, we might want to start the default navigation
-                // This decision can be delegated back to the repository
-            }
-        }
+        // This method is no longer needed as we are not pausing modes anymore.
+        // All modes are now treated as transient operations.
     }
 
     /**

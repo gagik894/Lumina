@@ -4,7 +4,6 @@ import android.util.Log
 import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.data.repository.AiOperationHelper
 import com.lumina.data.repository.FrameBufferManager
-import com.lumina.data.repository.LuminaRepositoryImpl
 import com.lumina.data.repository.PromptGenerator
 import com.lumina.data.repository.TransientOperationCoordinator
 import com.lumina.domain.model.NavigationCue
@@ -18,6 +17,13 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val TAG = "FindObjectOperation"
+
+private val COCO_LABELS = setOf(
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter",
+    "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
+    "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+)
 
 class FindObjectOperation @Inject constructor(
     private val transientOperationCoordinator: TransientOperationCoordinator,
@@ -36,7 +42,7 @@ class FindObjectOperation @Inject constructor(
                 transientOperationCoordinator.executeTransientOperation("find_object_$target") {
                     if (!isActive) return@executeTransientOperation
 
-                    val sourceFlow = if (normalizedTarget in LuminaRepositoryImpl.COCO_LABELS) {
+                    val sourceFlow = if (normalizedTarget in COCO_LABELS) {
                         findObjectWithObjectDetector(normalizedTarget, target)
                     } else {
                         findObjectWithAi(target)

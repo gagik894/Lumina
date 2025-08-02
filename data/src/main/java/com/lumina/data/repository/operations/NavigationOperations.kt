@@ -12,6 +12,7 @@ import com.lumina.domain.service.NavigationModeService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -31,14 +32,13 @@ class NavigationOperations @Inject constructor(
 ) {
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
 
-    fun startDirectorPipeline() {
-        if (navigationModeManager.isActive(NavigationModeService.OperatingMode.NAVIGATION)) {
-            return // Already running
-        }
-
-        Log.d(TAG, "Starting Director Pipeline (NAVIGATION mode)")
+    fun execute(): Flow<NavigationCue> = channelFlow {
+        Log.d(TAG, "Executing Navigation Operation")
 
         val navigationJob = repositoryScope.launch {
+            // Ensure object detector is not paused when navigation starts
+            objectDetectorDataSource.setPaused(false)
+
             objectDetectorDataSource.getDetectionStream(frameBufferManager.getFrameFlow())
                 .collectLatest { detectedObjects ->
                     if (!isActive) return@collectLatest
@@ -96,17 +96,21 @@ class NavigationOperations @Inject constructor(
             NavigationModeService.OperatingMode.NAVIGATION,
             navigationJob
         )
-    }
 
-    fun stopNavigation() {
-        Log.d(TAG, "🛑 Explicitly stopping navigation pipeline")
-        navigationModeManager.stopAllModes()
-        objectDetectorDataSource.setPaused(true)
-        frameBufferManager.clear()
-        threatAssessmentManager.reset()
-    }
+        val cueCollectorJob = launch {
+            alertCoordinator.getNavigationCueFlow().collect { cue ->
+                send(cue)
+            }
+        }
 
-    fun getNavigationCues(): Flow<NavigationCue> {
-        return alertCoordinator.getNavigationCueFlow()
+        invokeOnClose { exception ->
+            if (exception != null) {
+                Log.e(TAG, "Navigation flow closed with error", exception)
+            } else {
+                Log.d(TAG, "Navigation flow completed/cancelled. Stopping navigation.")
+            }
+            cueCollectorJob.cancel()
+            navigationModeManager.stopAllModes()
+        }
     }
 }

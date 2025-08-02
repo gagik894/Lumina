@@ -37,7 +37,5 @@ class LuminaOperations @Inject constructor(
     fun readTextMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
         readTextOperation.executeMultiFrame(images)
 
-    fun startNavigationPipeline() = navigationOperations.startDirectorPipeline()
-    fun stopNavigation() = navigationOperations.stopNavigation()
-    fun getNavigationCues(): Flow<NavigationCue> = navigationOperations.getNavigationCues()
+    fun startNavigation(): Flow<NavigationCue> = navigationOperations.execute()
 }

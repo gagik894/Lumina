@@ -87,4 +87,8 @@ class AiOperationHelper @Inject constructor(
             throw e
         }
     }
+
+    fun reset() {
+        gemmaDataSource.resetSession()
+    }
 }

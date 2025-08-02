@@ -13,14 +13,13 @@ import com.lumina.domain.usecase.AskQuestionUseCase
 import com.lumina.domain.usecase.DescribeSceneUseCase
 import com.lumina.domain.usecase.FindObjectUseCase
 import com.lumina.domain.usecase.GetInitializationStateUseCase
-import com.lumina.domain.usecase.GetNavigationCuesUseCase
 import com.lumina.domain.usecase.IdentifyCurrencyUseCase
 import com.lumina.domain.usecase.ProcessFrameUseCase
 import com.lumina.domain.usecase.ReadReceiptUseCase
 import com.lumina.domain.usecase.ReadTextUseCase
 import com.lumina.domain.usecase.StartCrossingModeUseCase
 import com.lumina.domain.usecase.StartNavigationUseCase
-import com.lumina.domain.usecase.StopNavigationUseCase
+import com.lumina.domain.usecase.StopAllOperationsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,15 +66,14 @@ enum class NavigationCueType {
 /**
  * ViewModel for the Scene Explorer feature that manages camera frames and AI-generated navigation cues.
  *
- * @param getNavigationCues Use case for getting continuous navigation cues
  * @param getInitializationState Use case for monitoring AI model initialization
  * @param processFrame Use case for processing camera frames
  * @param describeScene Use case for describing scenes
  * @param startCrossingMode Use case for starting crossing mode
  * @param findObject Use case for finding objects
  * @param askQuestionUseCase Use case for asking questions
- * @param stopNavigation Use case for stopping navigation
- * @param startNavigation Use case for starting navigation pipeline
+ * @param stopAllOperations Use case for stopping all operations
+ * @param startNavigation Use case for starting navigation as a transient operation
  * @param identifyCurrency Use case for identifying currency
  * @param readReceipt Use case for reading receipts
  * @param readText Use case for reading general text
@@ -84,14 +82,13 @@ enum class NavigationCueType {
  */
 @HiltViewModel
 class SceneExplorerViewModel @Inject constructor(
-    private val getNavigationCues: GetNavigationCuesUseCase,
     getInitializationState: GetInitializationStateUseCase,
     private val processFrame: ProcessFrameUseCase,
     private val describeScene: DescribeSceneUseCase,
     private val startCrossingModeUseCase: StartCrossingModeUseCase,
     private val findObject: FindObjectUseCase,
     private val askQuestionUseCase: AskQuestionUseCase,
-    private val stopNavigation: StopNavigationUseCase,
+    private val stopAllOperations: StopAllOperationsUseCase,
     private val startNavigation: StartNavigationUseCase,
     private val identifyCurrency: IdentifyCurrencyUseCase,
     private val readReceipt: ReadReceiptUseCase,
@@ -121,6 +118,7 @@ class SceneExplorerViewModel @Inject constructor(
     private var findJob: Job? = null
     private var crossingJob: Job? = null
     private var questionJob: Job? = null
+    private var navigationJob: Job? = null
 
     // Camera state management
     val cameraMode = cameraStateService.currentMode
@@ -131,10 +129,11 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     private val navigationCueFlow = merge(
-        // Only collect navigation cues when camera is active in navigation mode
+        // Navigation cues from active navigation job when camera is in navigation mode
         cameraStateService.currentMode.flatMapLatest { mode ->
-            if (mode == CameraStateService.CameraMode.NAVIGATION) {
-                getNavigationCues()
+            if (mode == CameraStateService.CameraMode.NAVIGATION && navigationJob?.isActive == true) {
+                // Navigation is already running, return empty flow to avoid duplicate streams
+                emptyFlow()
             } else {
                 emptyFlow()
             }
@@ -269,19 +268,37 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
-     * Starts navigation mode with camera activation.
+     * Starts navigation mode as a transient operation.
      */
     fun startNavigation() {
-        cameraStateService.activateCamera(CameraStateService.CameraMode.NAVIGATION)
-        // Navigation cues will start flowing automatically when camera becomes active
+        navigationJob?.cancel()
+        navigationJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                cameraStateService.activateCamera(CameraStateService.CameraMode.NAVIGATION)
+                startNavigation.invoke()
+                    .collect { cue ->
+                        manualCueFlow.emit(cue)
+                    }
+            } catch (e: Exception) {
+                cameraStateService.deactivateCamera()
+                manualCueFlow.emit(
+                    NavigationCue.InformationalAlert(
+                        message = "Error during navigation. Please try again.",
+                        isDone = true
+                    )
+                )
+            }
+        }
         speak("Navigation started")
     }
 
     /**
-     * Stops navigation and deactivates camera.
+     * Stops all operations and deactivates camera.
      */
     fun stopNavigationAndCamera() {
-        stopNavigation()
+        navigationJob?.cancel()
+        navigationJob = null
+        stopAllOperations()
         cameraStateService.deactivateCamera()
         speak("Navigation stopped")
     }
@@ -301,9 +318,8 @@ class SceneExplorerViewModel @Inject constructor(
      */
     private fun deactivateTextReadingMode() {
         cameraStateService.deactivateCamera()
-        // Clear frame buffer by stopping and immediately starting navigation if needed
-        // This ensures clean state for next operation
-        stopNavigation()
+        // Clear frame buffer by stopping all operations
+        stopAllOperations()
     }
 
     /**
@@ -443,6 +459,9 @@ class SceneExplorerViewModel @Inject constructor(
             lower == "cancel" || lower == "stop" -> {
                 stopFindMode()
                 stopCrossingMode()
+                navigationJob?.cancel()
+                navigationJob = null
+                stopAllOperations()
                 deactivateCameraAndClearBuffer() // Deactivate optimistic camera activation with buffer clear
                 speak("Operation cancelled")
             }
@@ -554,7 +573,7 @@ class SceneExplorerViewModel @Inject constructor(
      */
     private fun deactivateCameraAndClearBuffer() {
         cameraStateService.deactivateCamera()
-        stopNavigation() // This clears the frame buffer
+        stopAllOperations() // This clears the frame buffer
         Log.d(TAG, "🎤🔴 Deactivated optimistic camera and cleared buffer")
     }
 
@@ -665,8 +684,9 @@ class SceneExplorerViewModel @Inject constructor(
         questionJob?.cancel()
         findJob?.cancel()
         crossingJob?.cancel()
+        navigationJob?.cancel()
         textToSpeechService.shutdown()
-        stopNavigation()
+        stopAllOperations()
         // Deactivate camera when ViewModel is cleared
         cameraStateService.deactivateCamera()
     }

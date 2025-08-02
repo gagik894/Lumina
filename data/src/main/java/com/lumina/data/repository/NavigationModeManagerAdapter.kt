@@ -17,7 +17,9 @@ private const val TAG = "NavigationModeManager"
  */
 @Singleton
 class NavigationModeManager @Inject constructor(
-    private val navigationModeService: NavigationModeService
+    private val navigationModeService: NavigationModeService,
+    private val frameBufferManager: FrameBufferManager,
+    private val aiOperationHelper: AiOperationHelper
 ) {
 
     /** The coroutine job associated with the currently active long-running mode */
@@ -65,47 +67,6 @@ class NavigationModeManager @Inject constructor(
     }
 
     /**
-     * Pauses the currently active long-running mode to allow a transient operation to run.
-     *
-     * The paused mode is recorded so it can be resumed later. If no mode is active,
-     * this operation is a no-op.
-     *
-     * @return true if a mode was paused, false if no mode was active
-     */
-    fun pauseActiveMode(): Boolean {
-        return if (activeJob?.isActive == true) {
-            Log.d(TAG, "Pausing active mode for transient operation")
-            val wasPaused = navigationModeService.pauseActiveMode()
-            activeJob?.cancel()
-            activeJob = null
-            wasPaused
-        } else {
-            Log.d(TAG, "No active mode to pause")
-            navigationModeService.clearPausedMode()
-            false
-        }
-    }
-
-    /**
-     * Gets the mode that was previously paused and should be resumed.
-     *
-     * @return The paused mode, or null if no mode was paused
-     */
-    fun getPausedMode(): NavigationModeService.OperatingMode? {
-        return navigationModeService.getPausedMode()
-    }
-
-    /**
-     * Clears the paused mode without resuming it.
-     *
-     * This is typically called after successfully resuming a mode or when
-     * deciding not to resume the paused mode.
-     */
-    fun clearPausedMode() {
-        navigationModeService.clearPausedMode()
-    }
-
-    /**
      * Stops all modes and cleans up resources.
      *
      * This cancels any active job and clears all state. This is typically
@@ -116,6 +77,8 @@ class NavigationModeManager @Inject constructor(
         activeJob?.cancel()
         activeJob = null
         navigationModeService.stopAllModes()
+        frameBufferManager.clear()
+        aiOperationHelper.reset()
     }
 
     /**

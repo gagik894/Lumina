@@ -27,13 +27,7 @@ interface LuminaRepository {
      *
      * @return Flow of navigation cues with appropriate urgency levels.
      */
-    fun getNavigationCues(): Flow<NavigationCue>
-
-    /**
-     * Explicitly starts the navigation director pipeline for on-demand usage.
-     * This should be called when the user activates navigation mode.
-     */
-    fun startNavigationPipeline()
+    fun startNavigation(): Flow<NavigationCue>
 
     /**
      * Processes a new camera frame for object detection and potential AI analysis.
@@ -43,9 +37,9 @@ interface LuminaRepository {
     suspend fun processNewFrame(image: ImageInput)
 
     /**
-     * Stops the proactive navigation pipeline and releases all associated resources.
+     * Stops all ongoing operations and releases associated resources.
      */
-    fun stopNavigation()
+    fun stopAllOperations()
 
     /**
      * Describes a scene based on the provided image and prompt. This is a one-shot operation.

@@ -1,15 +1,11 @@
 package com.lumina.data.repository
 
 import com.lumina.data.datasource.AiDataSource
-import com.lumina.data.repository.operations.FindObjectOperation
 import com.lumina.data.repository.operations.LuminaOperations
-import com.lumina.data.repository.operations.NavigationOperations
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.repository.LuminaRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
@@ -29,20 +25,15 @@ import javax.inject.Singleton
  *
  * @param gemmaDataSource The AI data source responsible for generating scene descriptions
  * @param frameBufferManager Manages the circular buffer of camera frames
- * @param navigationOperations Handles navigation mode lifecycle and transitions
- * @param findObjectOperation Handles the find object operation
  * @param luminaOperationsProvider Provider for [LuminaOperations] to break circular dependency
  */
 @Singleton
 class LuminaRepositoryImpl @Inject constructor(
     private val gemmaDataSource: AiDataSource,
     private val frameBufferManager: FrameBufferManager,
-    private val navigationOperations: NavigationOperations,
-    private val findObjectOperation: FindObjectOperation,
-    private val luminaOperationsProvider: Provider<LuminaOperations>
+    private val luminaOperationsProvider: Provider<LuminaOperations>,
+    private val navigationModeManager: NavigationModeManager
 ) : LuminaRepository {
-
-    private val repositoryScope = CoroutineScope(Dispatchers.Default)
 
     // Lazy initialization to break circular dependency
     private val luminaOperations: LuminaOperations by lazy { luminaOperationsProvider.get() }
@@ -50,15 +41,11 @@ class LuminaRepositoryImpl @Inject constructor(
     override val initializationState: StateFlow<InitializationState> =
         gemmaDataSource.initializationState
 
-    override fun getNavigationCues(): Flow<NavigationCue> = luminaOperations.getNavigationCues()
-
-    override fun startNavigationPipeline() = luminaOperations.startNavigationPipeline()
+    override fun startNavigation(): Flow<NavigationCue> = luminaOperations.startNavigation()
 
     override suspend fun processNewFrame(image: ImageInput) {
         frameBufferManager.processNewFrame(image)
     }
-
-    override fun stopNavigation() = navigationOperations.stopNavigation()
 
     override fun describeScene(
         image: ImageInput,
@@ -90,19 +77,7 @@ class LuminaRepositoryImpl @Inject constructor(
     override fun readTextMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
         luminaOperations.readTextMultiFrame(images)
 
-    companion object {
-        val COCO_LABELS = setOf(
-            "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-            "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
-            "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
-            "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
-            "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
-            "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-            "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
-            "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop",
-            "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
-            "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
-            "toothbrush"
-        )
+    override fun stopAllOperations() {
+        navigationModeManager.stopAllModes()
     }
 }

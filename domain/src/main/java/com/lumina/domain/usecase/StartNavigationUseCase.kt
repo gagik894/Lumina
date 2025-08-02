@@ -1,33 +1,32 @@
 package com.lumina.domain.usecase
 
+import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.repository.LuminaRepository
-import com.lumina.domain.service.CameraStateService
+import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 
 /**
- * Use case for starting the navigation pipeline and activating the camera.
+ * Use case for starting the navigation mode as a transient operation.
  *
- * This use case provides on-demand navigation activation, allowing users
- * to control when the camera and navigation system should be active for
- * better battery life and privacy.
+ * This use case starts navigation as a self-contained transient operation
+ * that returns a Flow of navigation cues. When the flow is cancelled or completed,
+ * all resources are automatically cleaned up.
  *
  * @property repository The LuminaRepository instance used to start navigation.
- * @property cameraStateService The CameraStateService used to activate the camera.
  */
 class StartNavigationUseCase @Inject constructor(
-    private val repository: LuminaRepository,
-    private val cameraStateService: CameraStateService
+    private val repository: LuminaRepository
 ) {
 
     /**
-     * Starts the navigation director pipeline and activates the camera for continuous environmental monitoring.
+     * Starts navigation as a transient operation and returns a flow of navigation cues.
      *
-     * This should be called when the user explicitly requests navigation to begin.
-     * The camera will be activated in navigation mode and the navigation system will
-     * continuously analyze camera frames and provide intelligent alerts based on the environment.
+     * The returned flow will emit navigation cues continuously until cancelled.
+     * When the flow is cancelled or completed, all associated resources are automatically cleaned up.
+     *
+     * @return Flow of navigation cues with appropriate urgency levels.
      */
-    operator fun invoke() {
-        cameraStateService.switchToNavigation()
-        repository.startNavigationPipeline()
+    operator fun invoke(): Flow<NavigationCue> {
+        return repository.startNavigation()
     }
 }

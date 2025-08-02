@@ -149,16 +149,6 @@ fun SceneExplorerScreen(
                             )
                         }
 
-                        // TTS Controls
-                        TtsControlPanel(
-                            onRepeat = { viewModel.repeatCurrentDescription() },
-                            onStop = { viewModel.stopSpeech() },
-                            isTtsInitialized = uiState.isTtsInitialized,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(16.dp)
-                        )
-
                         // Long-press anywhere to start voice-based Find mode.
                     }
                     is InitializationState.Error -> {
