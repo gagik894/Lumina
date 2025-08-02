@@ -72,6 +72,7 @@ class AiOperationHelper @Inject constructor(
             Log.e(TAG, "AI operation failed", e)
             throw e
         }
+        // session reset removed: only perform reset when mode completes
     }
 
     fun generateResponse(
@@ -86,6 +87,7 @@ class AiOperationHelper @Inject constructor(
             Log.e(TAG, "AI operation failed", e)
             throw e
         }
+        // session reset removed: only perform reset when mode completes
     }
 
     fun reset() {

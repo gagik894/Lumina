@@ -63,6 +63,13 @@ class NavigationModeManager @Inject constructor(
         navigationModeService.startMode(mode)
         activeJob = job
 
+        // When this mode's job completes, perform cleanup
+        job.invokeOnCompletion { cause ->
+            Log.d(TAG, "Mode $mode completed (cause: $cause), performing cleanup")
+            frameBufferManager.clear()
+            aiOperationHelper.reset()
+        }
+
         Log.d(TAG, "Started mode: $mode")
     }
 

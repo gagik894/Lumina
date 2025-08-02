@@ -125,35 +125,7 @@ class GemmaAiDataSource @Inject constructor(
 
         val newSession = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
 
-        val systemPrompt =
-            """You are an AI assistant for blind users providing real-time navigation assistance.
-            CRITICAL RULES:
-            - Be extremely concise and direct
-            - Prioritize safety threats and moving objects (e.g., cars, pedestrians, crosswalks, stairs, 
-              curbs, etc.)
-            - When analyzing multiple frames, identify movement patterns, for example:
-              - "Car approaching fast"
-              - "Pedestrian moving left",
-            no need to describe static objects
-            - Maximum 5 words per response for critical alerts (E.g., "Car approaching fast")
-            - Maximum 10 words for informational updates (E.g., "New pedestrian entering scene")
-            
-            Respond with actionable navigation guidance. (E.g., "Turn left now" or "Stop immediately")
-            
-            
-            FINDER MODE:
-            If asked to locate a specific object, describe its location (e.g., "keyboard centered near") in no more than 6 words.
-
-            IMPORTANT: State your answer ONCE and then stop. Do not repeat or refine the sentence in subsequent tokens.
-
-            OPEN QUESTION MODE:
-            When the user asks a direct question, answer it concisely based on the image content. If the answer isn't in the image, state that clearly.
-
-            MOVEMENT ANALYSIS:
-            When given multiple images in sequence, analyze:
-            1. Object movement direction and speed
-            """
-
+        val systemPrompt = getSystemPrompt()
         newSession.addQueryChunk(systemPrompt)
         approximateTokenCount = estimateTokens(systemPrompt)
 
@@ -294,18 +266,49 @@ class GemmaAiDataSource @Inject constructor(
     override fun resetSession() {
         if (generationMutex.tryLock()) {
             try {
-                navigationSession?.close()
+                // If we haven't used many tokens yet, just reset the counter
+                // This avoids unnecessary session recreation for quick resets
+                if (approximateTokenCount < 1000) { // fresh session
+                    approximateTokenCount = estimateTokens(getSystemPrompt())
+                    Log.d(TAG, "Session context reset (lightweight) - keeping fresh session")
+                    return
+                }
+
+                // For sessions with more context, recreate to truly clear memory
+                if (navigationSession != null) {
+                    navigationSession?.close()
+                    createNewSession() // Creates a fresh session with system prompt
+                } else {
+                    createNewSession() // Create if doesn't exist
+                }
+                Log.d(TAG, "Session context cleared, fresh session ready")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to reset session context", e)
+                // Fallback: set to null so it gets recreated on next use
                 navigationSession = null
                 approximateTokenCount = 0
-                Log.d(TAG, "Session reset")
-            } catch (e: IllegalStateException) {
-                Log.w(TAG, "Failed to close session cleanly, may be busy.", e)
             } finally {
                 generationMutex.unlock()
             }
         } else {
-            Log.w(TAG, "Reset session called while generation in progress. Ignoring.")
+            Log.w(
+                TAG,
+                "Reset session called while generation in progress. Will reset on next call."
+            )
+            // Schedule reset for next generation call
+            navigationSession = null
+            approximateTokenCount = maxTokens + 1 // Force recreation
         }
+    }
+
+    /**
+     * Returns the system prompt for token estimation.
+     */
+    private fun getSystemPrompt(): String {
+        return """You are an AI assistant for blind users providing real-time navigation assistance.
+            CRITICAL RULES:
+            - Be extremely concise and direct
+            """
     }
 
     override fun close() {
