@@ -1,8 +1,16 @@
 package com.lumina.data.repository
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.lumina.data.datasource.TimestampedFrame
 import com.lumina.data.util.FrameSelector
+import com.lumina.domain.model.ImageInput
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,6 +28,28 @@ import javax.inject.Singleton
  */
 @Singleton
 class FrameBufferManager @Inject constructor() {
+
+    private val managerScope = CoroutineScope(Dispatchers.Default)
+    private val _frameFlow = MutableSharedFlow<Pair<Bitmap, Long>>(
+        replay = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+
+    init {
+        managerScope.launch {
+            _frameFlow.collect { (bitmap, timestamp) ->
+                addFrame(bitmap, timestamp)
+            }
+        }
+    }
+
+    fun getFrameFlow(): Flow<Pair<Bitmap, Long>> = _frameFlow
+
+    suspend fun processNewFrame(image: ImageInput) {
+        val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
+        val timestamp = System.currentTimeMillis()
+        _frameFlow.tryEmit(Pair(bitmap, timestamp))
+    }
 
     companion object {
         private const val MAX_BUFFER_SIZE = 35
@@ -46,7 +76,10 @@ class FrameBufferManager @Inject constructor() {
 
         // Remove oldest frames if we exceed capacity
         if (frameBuffer.size > MAX_BUFFER_SIZE) {
-            frameBuffer.removeFirst()
+            val oldFrame = frameBuffer.removeFirst()
+            if (!oldFrame.bitmap.isRecycled) {
+                oldFrame.bitmap.recycle()
+            }
         }
     }
 
@@ -98,38 +131,20 @@ class FrameBufferManager @Inject constructor() {
      * @return Immutable list of all buffered frames
      */
     @Synchronized
-    fun getAllFrames(): List<TimestampedFrame> {
+    fun getFrames(): List<TimestampedFrame> {
         return frameBuffer.toList()
     }
 
     /**
-     * Clears all frames from the buffer.
-     *
-     * This is typically called when stopping navigation or resetting the system.
-     * Memory cleanup for bitmaps should be handled by the caller if needed.
+     * Clears all frames from the buffer and recycles their bitmaps.
      */
     @Synchronized
     fun clear() {
+        frameBuffer.forEach {
+            if (!it.bitmap.isRecycled) {
+                it.bitmap.recycle()
+            }
+        }
         frameBuffer.clear()
-    }
-
-    /**
-     * Returns the current number of frames in the buffer.
-     *
-     * @return Current buffer size
-     */
-    @Synchronized
-    fun size(): Int {
-        return frameBuffer.size
-    }
-
-    /**
-     * Checks if the buffer is empty.
-     *
-     * @return true if no frames are currently buffered
-     */
-    @Synchronized
-    fun isEmpty(): Boolean {
-        return frameBuffer.isEmpty()
     }
 }
