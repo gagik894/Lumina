@@ -59,29 +59,128 @@ class PromptGenerationService @Inject constructor() {
     }
 
     /**
-     * Generates a prompt for street crossing guidance.
+     * Generates initial context-setting prompt for street crossing guidance.
      *
-     * This prompt is specifically designed for the crossing mode, emphasizing
-     * safety, brevity, and clear completion signals.
+     * This comprehensive prompt establishes the AI's role and response patterns
+     * for the entire crossing session. Sent only once at mode initialization.
      *
-     * @return Prompt for crossing guidance with termination instructions
+     * @return Full context prompt for crossing mode initialization
      */
-    fun generateCrossingGuidancePrompt(): String {
-        return "You are in CROSSING MODE for a BLIND user. SAFETY IS CRITICAL. " +
-                "Analyze ALL vehicles in frame - cars, trucks, bikes, motorcycles. " +
-                "Check for TRAFFIC LIGHTS - look for red, yellow, green signals and any countdown timers. " +
-                "If ANY vehicle is moving toward crosswalk or visible in street, say 'WAIT!'. " +
-                "If traffic light shows RED or YELLOW for pedestrians, say 'WAIT!' . " +
-                "If you see a countdown timer on traffic light, say 'WAIT [X] SECONDS' where X is the exact number shown. " +
-                "Only say CROSS when road is completely clear of ALL moving vehicles AND traffic light is GREEN for pedestrians. " +
-                "Use: 'WAIT!' (if any vehicles present), 'WAIT [X] SECONDS!' (if countdown visible), 'CROSS'. (only when 100% safe),' ADJUST LEFT/RIGHT' (positioning). " +
-                "When user safely reaches other side, respond 'CROSSING COMPLETE'."
+    fun generateCrossingGuidanceInitialPrompt(): String {
+        return "STREET CROSSING ASSISTANT for BLIND user. SAFETY FIRST.\n\n" +
+                "ROLE: You are now a dedicated crossing assistant. I will send you multiple frames " +
+                "showing a street crossing scene. For each frame, analyze and respond immediately.\n\n" +
+                "ANALYZE:\n" +
+                "- Traffic lights: RED/YELLOW = WAIT, GREEN = may proceed if clear\n" +
+                "- All vehicles: cars, trucks, bikes, motorcycles in ANY direction\n" +
+                "- Crosswalk position: is user properly aligned?\n" +
+                "- Pedestrian signals and countdown timers\n" +
+                "- Walking speed and crossing progress\n\n" +
+                "RESPONSES (use EXACTLY these phrases):\n" +
+                "- 'WAIT' - any vehicles present, red/yellow light, or unsafe\n" +
+                "- 'TIMER [X]' - countdown showing X seconds (extract exact number)\n" +
+                "- 'STEP LEFT' or 'STEP RIGHT' - positioning adjustments\n" +
+                "- 'CLEAR TO CROSS' - only when 100% safe: green light + no vehicles\n" +
+                "- 'KEEP GOING' - user is mid-crossing and safe to continue\n" +
+                "- 'HURRY UP' - crossing time is running out\n" +
+                "- 'CROSSING COMPLETE' - user has reached other side safely\n\n" +
+                "Keep responses under 10 words. Be decisive and immediate."
     }
 
     /**
-     * Generates a prompt for object detection queries.
+     * Generates minimal follow-up prompt for subsequent crossing frames.
      *
-     * This prompt is optimized for binary yes/no responses to determine if a
+     * Used after the initial context is established to minimize token usage
+     * while maintaining the crossing analysis context.
+     *
+     * @return Minimal prompt for continued crossing analysis
+     */
+    fun generateCrossingGuidanceFollowUpPrompt(): String {
+        return "Analyze crossing safety:"
+    }
+
+    /**
+     * Generates initial context-setting prompt for navigation mode.
+     *
+     * This comprehensive prompt establishes the AI's role for continuous environmental
+     * navigation assistance. Sent only once at navigation mode initialization.
+     *
+     * @return Full context prompt for navigation mode initialization
+     */
+    fun generateNavigationGuidanceInitialPrompt(): String {
+        return "NAVIGATION ASSISTANT for BLIND user walking outdoors.\n\n" +
+                "ROLE: You are now a dedicated navigation assistant. I will send you multiple frames " +
+                "showing the path ahead. For each frame, analyze and provide brief guidance.\n\n" +
+                "ANALYZE:\n" +
+                "- Path conditions: clear, obstacles, uneven surfaces\n" +
+                "- Immediate hazards: steps, holes, construction, debris\n" +
+                "- Navigation landmarks: curbs, intersections, buildings\n" +
+                "- Pedestrian space: sidewalk width, other people\n" +
+                "- Surface changes: grass to concrete, stairs, ramps\n\n" +
+                "RESPONSES:\n" +
+                "- 'CLEAR PATH' - safe to continue straight\n" +
+                "- 'OBSTACLE AHEAD' - something blocking the path\n" +
+                "- 'STEP DOWN' or 'STEP UP' - elevation changes\n" +
+                "- 'BEAR LEFT' or 'BEAR RIGHT' - gentle direction adjustments\n" +
+                "- 'INTERSECTION AHEAD' - approaching crossing\n" +
+                "- 'UNEVEN SURFACE' - rough or broken pavement\n\n" +
+                "Keep responses under 15 words. Focus on immediate path ahead (next 10 feet)."
+    }
+
+    /**
+     * Generates minimal follow-up prompt for subsequent navigation frames.
+     *
+     * Used after initial context is established to minimize token usage
+     * while maintaining navigation analysis context.
+     *
+     * @return Minimal prompt for continued navigation analysis
+     */
+    fun generateNavigationGuidanceFollowUpPrompt(): String {
+        return "Path ahead:"
+    }
+
+    /**
+     * Generates initial context-setting prompt for object finding mode.
+     *
+     * This comprehensive prompt establishes the AI's role for targeted object detection
+     * and location guidance. Sent only once at object finding mode initialization.
+     *
+     * @param target The object to search for
+     * @return Full context prompt for object finding mode initialization
+     */
+    fun generateObjectFindingInitialPrompt(target: String): String {
+        return "OBJECT DETECTION ASSISTANT for BLIND user.\n\n" +
+                "ROLE: Help user locate a '$target'. I will send you multiple frames from their perspective. " +
+                "For each frame, search for the target object and provide location guidance.\n\n" +
+                "ANALYZE:\n" +
+                "- Is the '$target' visible in the frame?\n" +
+                "- If yes: exact position (left, right, center, near, far)\n" +
+                "- If no: suggest search direction\n" +
+                "- Distance estimation if possible\n\n" +
+                "RESPONSES:\n" +
+                "- 'NOT VISIBLE' - target not in current view\n" +
+                "- 'TURN LEFT' or 'TURN RIGHT' - search suggestions\n" +
+                "- 'STRAIGHT AHEAD' - target directly in front\n" +
+                "- 'TO YOUR LEFT' or 'TO YOUR RIGHT' - target positioning\n" +
+                "- 'VERY CLOSE' or 'FAR AWAY' - distance indicators\n" +
+                "- 'FOUND IT' - target clearly identified and reachable\n\n" +
+                "Keep responses under 10 words. Be precise about direction and distance."
+    }
+
+    /**
+     * Generates minimal follow-up prompt for subsequent object finding frames.
+     *
+     * @param target The object being searched for
+     * @return Minimal prompt for continued object detection
+     */
+    fun generateObjectFindingFollowUpPrompt(target: String): String {
+        return "Find $target:"
+    }
+
+    /**
+     * Generates a prompt for binary object detection (yes/no).
+     *
+     * This prompt is optimized for simple yes/no responses to determine if a
      * specific object is present in the current view.
      *
      * @param target The object to search for
@@ -155,42 +254,77 @@ class PromptGenerationService @Inject constructor() {
     /**
      * Generates a prompt for currency identification.
      *
-     * This prompt is specifically designed for identifying money bills, coins,
-     * and providing denomination information to visually impaired users.
+     * This prompt provides specific analysis guidelines and structured response formats
+     * while allowing some flexibility for edge cases and unclear situations.
      *
-     * @return Prompt optimized for currency recognition and value identification
+     * @return Prompt optimized for currency recognition with clear response patterns
      */
     fun generateCurrencyIdentificationPrompt(): String {
-        return "Identify the currency in this image. State the exact denomination and currency, for example, '10 US Dollars' or '5 Euro'. " +
-                "Be precise and clear"
+        return "CURRENCY IDENTIFICATION ASSISTANT for BLIND user.\n\n" +
+                "ANALYZE:\n" +
+                "- Written numbers and text on currency\n" +
+                "- Colors, patterns, and visual features\n" +
+                "- Size and shape characteristics\n" +
+                "- Security features if visible\n\n" +
+                "RESPONSES (be exact):\n" +
+                "- '[AMOUNT] [CURRENCY]' - e.g., '20 US Dollars', '5 Euro', '1000 Japanese Yen'\n" +
+                "- 'UNCLEAR - [reason]' - if denomination cannot be determined, explain why\n" +
+                "- 'NOT CURRENCY' - if item is not money\n" +
+                "- 'MULTIPLE BILLS - [list]' - if several denominations visible\n" +
+                "- 'PARTIAL VIEW - [what you can see]' - if only part of currency visible\n\n" +
+                "Be precise and clear. State only what you can confirm. If unsure, explain what you see."
     }
 
     /**
      * Generates a prompt for receipt and document reading.
      *
-     * This prompt is optimized for reading receipts, bills, and other text documents,
-     * extracting the most relevant information for the user.
+     * This prompt provides structured reading guidelines while allowing natural language
+     * flow for presenting the extracted information to the user.
      *
-     * @return Prompt designed for comprehensive document text extraction
+     * @return Prompt designed for organized document text extraction
      */
     fun generateReceiptReadingPrompt(): String {
-        return "Read only the important information from this receipt or document aloud. Start with the business name and date if visible. " +
-                "List the main items and their prices, the total amount, and payment method if shown. Do not read the receipt number, bar code, or other irrelevant details. " +
-                "Be organized and speak clearly."
+        return "RECEIPT READING ASSISTANT for BLIND user.\n\n" +
+                "READ IN ORDER:\n" +
+                "1. Business name and date (if visible)\n" +
+                "2. Main items with prices\n" +
+                "3. Subtotal, tax, and total amount\n" +
+                "4. Payment method (if shown)\n\n" +
+                "SKIP:\n" +
+                "- Receipt numbers and barcodes\n" +
+                "- Store addresses (unless specifically relevant)\n" +
+                "- Promotional text and disclaimers\n\n" +
+                "RESPONSES:\n" +
+                "- Start with business name: 'Receipt from [Business Name]'\n" +
+                "- For unclear text: 'Cannot read [section]'\n" +
+                "- For missing info: 'No [item] visible'\n" +
+                "- End with: 'Total: [amount]' or 'Total not visible'\n\n" +
+                "Be organized and speak clearly. Group related information together."
     }
 
     /**
      * Generates a prompt for general text reading from images.
      *
-     * This prompt handles any text content in images, from signs to labels,
-     * providing clear and structured reading for visually impaired users.
+     * This prompt provides systematic reading guidelines while maintaining flexibility
+     * for different types of text content and layouts.
      *
-     * @return Prompt for general text extraction and reading
+     * @return Prompt for comprehensive text extraction and reading
      */
     fun generateTextReadingPrompt(): String {
-        return "Read all visible text in this image clearly and systematically. " +
-                "Start with the largest or most prominent text, then continue with smaller details. " +
-                "Organize the information logically"
+        return "TEXT READING ASSISTANT for BLIND user.\n\n" +
+                "READ IN ORDER:\n" +
+                "1. Largest or most prominent text first\n" +
+                "2. Headlines and titles\n" +
+                "3. Body text and details\n" +
+                "4. Small print and footnotes\n\n" +
+                "RESPONSES:\n" +
+                "- Start with document type: 'This appears to be [type]'\n" +
+                "- For headers: 'Main heading: [text]'\n" +
+                "- For body text: Read naturally but clearly\n" +
+                "- For unclear sections: 'Text unclear in this section'\n" +
+                "- For empty areas: 'No text in this area'\n\n" +
+                "ORGANIZE: Group related information logically. Separate different sections clearly when speaking. " +
+                "If text is handwritten or stylized, mention this to the user."
     }
 
     /**
@@ -238,5 +372,51 @@ class PromptGenerationService @Inject constructor() {
                 "Analyze all frames to read the text with maximum accuracy and completeness. " +
                 "Start with the largest or most prominent text, then continue with smaller details. " +
                 "Use information from all frames to provide the most complete and accurate reading. Organize the information logically."
+    }
+
+    /**
+     * Enum defining different operational modes that support two-phase prompting.
+     * Only continuous operations use the two-phase system.
+     */
+    enum class OperationMode {
+        CROSSING_GUIDANCE,      // Continuous - uses two-phase prompting
+        NAVIGATION_GUIDANCE,    // Continuous - uses two-phase prompting  
+        OBJECT_FINDING         // Continuous - uses two-phase prompting
+    }
+
+    /**
+     * Gets the initial context-setting prompt for continuous operation modes.
+     *
+     * @param mode The operation mode to get the initial prompt for
+     * @param target Optional target parameter for object finding mode
+     * @return The initial comprehensive prompt for the mode
+     */
+    fun getInitialPrompt(mode: OperationMode, target: String? = null): String {
+        return when (mode) {
+            OperationMode.CROSSING_GUIDANCE -> generateCrossingGuidanceInitialPrompt()
+            OperationMode.NAVIGATION_GUIDANCE -> generateNavigationGuidanceInitialPrompt()
+            OperationMode.OBJECT_FINDING -> {
+                requireNotNull(target) { "Target must be provided for object finding mode" }
+                generateObjectFindingInitialPrompt(target)
+            }
+        }
+    }
+
+    /**
+     * Gets the minimal follow-up prompt for subsequent frames in continuous operation modes.
+     *
+     * @param mode The operation mode to get the follow-up prompt for
+     * @param target Optional target parameter for object finding mode
+     * @return The minimal follow-up prompt for the mode
+     */
+    fun getFollowUpPrompt(mode: OperationMode, target: String? = null): String {
+        return when (mode) {
+            OperationMode.CROSSING_GUIDANCE -> generateCrossingGuidanceFollowUpPrompt()
+            OperationMode.NAVIGATION_GUIDANCE -> generateNavigationGuidanceFollowUpPrompt()
+            OperationMode.OBJECT_FINDING -> {
+                requireNotNull(target) { "Target must be provided for object finding mode" }
+                generateObjectFindingFollowUpPrompt(target)
+            }
+        }
     }
 }

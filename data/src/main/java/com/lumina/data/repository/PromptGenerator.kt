@@ -49,11 +49,12 @@ class PromptGenerator @Inject constructor(
      * @return Prompt for crossing guidance with termination instructions
      */
     fun generateCrossingGuidancePrompt(): String {
-        return promptGenerationService.generateCrossingGuidancePrompt()
+        return promptGenerationService.generateCrossingGuidanceInitialPrompt()
     }
 
     /**
      * Generates a prompt for object detection queries.
+     * Returns a binary yes/no prompt for object presence detection.
      *
      * @param target The object to search for
      * @return Prompt for binary object detection
@@ -64,6 +65,7 @@ class PromptGenerator @Inject constructor(
 
     /**
      * Generates a prompt for object location description.
+     * Used after object detection confirms presence.
      *
      * @param target The object whose location should be described
      * @return Prompt for spatial object description

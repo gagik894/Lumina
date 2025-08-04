@@ -7,6 +7,8 @@ import com.lumina.data.repository.FrameBufferManager
 import com.lumina.data.repository.TransientOperationCoordinator
 import com.lumina.data.service.TrafficLightTimerService
 import com.lumina.domain.model.NavigationCue
+import com.lumina.domain.service.PromptGenerationService
+import com.lumina.domain.service.TwoPhasePromptManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,7 +26,8 @@ class CrossingModeOperation @Inject constructor(
     private val frameBufferManager: FrameBufferManager,
     private val alertCoordinator: AlertCoordinator,
     private val aiOperationHelper: AiOperationHelper,
-    private val trafficLightTimerService: TrafficLightTimerService
+    private val trafficLightTimerService: TrafficLightTimerService,
+    private val twoPhasePromptManager: TwoPhasePromptManager
 ) {
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
     private var currentCrossingJob: Job? = null
@@ -37,7 +40,16 @@ class CrossingModeOperation @Inject constructor(
 
                     Log.d(
                         TAG,
-                        "Starting enhanced CROSSING operation with traffic light timer support"
+                        "Starting enhanced CROSSING operation with two-phase prompting"
+                    )
+
+                    // Create unique session ID for this crossing session
+                    val sessionId = "crossing_${System.currentTimeMillis()}"
+
+                    // Start two-phase prompting session
+                    twoPhasePromptManager.startSession(
+                        sessionId,
+                        PromptGenerationService.OperationMode.CROSSING_GUIDANCE
                     )
 
                     // Listen for timer events
@@ -95,6 +107,7 @@ class CrossingModeOperation @Inject constructor(
                             try {
                                 aiOperationHelper.withAiOperation {
                                     alertCoordinator.coordinateEnhancedCrossingGuidance(
+                                        sessionId = sessionId,
                                         frames = frames,
                                         aiResponseGenerator = aiOperationHelper::generateResponse,
                                         onCrossingComplete = {
@@ -121,6 +134,10 @@ class CrossingModeOperation @Inject constructor(
                         timerEventJob.cancel()
                         alertCueCollectorJob.cancel()
                         trafficLightTimerService.stopTimer()
+                        // End the two-phase prompting session
+                        repositoryScope.launch {
+                            twoPhasePromptManager.endSession(sessionId)
+                        }
                     }
                 }
             } catch (e: Exception) {

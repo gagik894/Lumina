@@ -3,6 +3,7 @@ package com.lumina.data.repository
 import android.util.Log
 import com.lumina.data.datasource.TimestampedFrame
 import com.lumina.domain.model.NavigationCue
+import com.lumina.domain.service.TwoPhasePromptManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import javax.inject.Inject
@@ -26,7 +27,8 @@ private const val TAG = "AlertCoordinator"
  */
 @Singleton
 class AlertCoordinator @Inject constructor(
-    private val promptGenerator: PromptGenerator
+    private val promptGenerator: PromptGenerator,
+    private val twoPhasePromptManager: TwoPhasePromptManager
 ) {
 
     /** Shared flow for broadcasting navigation cues to subscribers */
@@ -206,14 +208,18 @@ class AlertCoordinator @Inject constructor(
      * @param onTimerDetected Callback invoked when a traffic light timer is detected (seconds remaining)
      */
     suspend fun coordinateEnhancedCrossingGuidance(
+        sessionId: String,
         frames: List<TimestampedFrame>,
         aiResponseGenerator: suspend (String, List<TimestampedFrame>) -> Flow<Pair<String, Boolean>>,
         onCrossingComplete: () -> Unit,
         onTimerDetected: suspend (Int) -> Unit = {}
     ) {
-        Log.i(TAG, "Coordinating enhanced crossing guidance with traffic light detection")
+        Log.i(TAG, "Coordinating enhanced crossing guidance with session: $sessionId")
 
-        val prompt = promptGenerator.generateCrossingGuidancePrompt()
+        // Get appropriate prompt using two-phase system
+        val prompt = twoPhasePromptManager.getPrompt(sessionId)
+            ?: promptGenerator.generateCrossingGuidancePrompt() // Fallback to old system
+            
         val responseBuffer = StringBuilder()
 
         try {
@@ -229,6 +235,8 @@ class AlertCoordinator @Inject constructor(
                             navigationCueFlow.emit(
                                 NavigationCue.InformationalAlert("Crossing complete.", true)
                             )
+                            // End the session when crossing is complete
+                            twoPhasePromptManager.endSession(sessionId)
                             onCrossingComplete()
                         }
 
@@ -314,6 +322,97 @@ class AlertCoordinator @Inject constructor(
             Log.e(TAG, "Error generating custom alert", e)
             navigationCueFlow.emit(
                 NavigationCue.InformationalAlert("Unable to process request", true)
+            )
+        }
+    }
+
+    /**
+     * Coordinates navigation guidance with two-phase prompting system.
+     *
+     * @param sessionId Unique identifier for this navigation session
+     * @param frames Timestamped frames containing navigation scene
+     * @param aiResponseGenerator Function that generates AI responses
+     */
+    suspend fun coordinateNavigationGuidance(
+        sessionId: String,
+        frames: List<TimestampedFrame>,
+        aiResponseGenerator: suspend (String, List<TimestampedFrame>) -> Flow<Pair<String, Boolean>>
+    ) {
+        Log.i(TAG, "Coordinating navigation guidance with session: $sessionId")
+
+        // Get appropriate prompt using two-phase system
+        val prompt = twoPhasePromptManager.getPrompt(sessionId)
+            ?: promptGenerator.generateContextualNavigationPrompt("urban") // Fallback to old system
+
+        try {
+            aiResponseGenerator(prompt, frames)
+                .collect { (chunk, done) ->
+                    if (done && chunk.isNotBlank()) {
+                        // Emit navigation guidance as ambient updates
+                        navigationCueFlow.emit(
+                            NavigationCue.AmbientUpdate(chunk.trim(), done)
+                        )
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during navigation guidance: ${e.message}")
+            navigationCueFlow.emit(
+                NavigationCue.InformationalAlert(
+                    "Navigation guidance temporarily unavailable",
+                    true
+                )
+            )
+        }
+    }
+
+    /**
+     * Coordinates object finding with two-phase prompting system.
+     *
+     * @param sessionId Unique identifier for this object finding session
+     * @param target The object to search for
+     * @param frames Timestamped frames containing scene
+     * @param aiResponseGenerator Function that generates AI responses
+     * @param onObjectFound Callback when object is found
+     */
+    suspend fun coordinateObjectFinding(
+        sessionId: String,
+        target: String,
+        frames: List<TimestampedFrame>,
+        aiResponseGenerator: suspend (String, List<TimestampedFrame>) -> Flow<Pair<String, Boolean>>,
+        onObjectFound: () -> Unit = {}
+    ) {
+        Log.i(TAG, "Coordinating object finding for '$target' with session: $sessionId")
+
+        // Get appropriate prompt using two-phase system
+        val prompt = twoPhasePromptManager.getPrompt(sessionId)
+            ?: promptGenerator.generateObjectDetectionPrompt(target) // Fallback to old system
+
+        try {
+            aiResponseGenerator(prompt, frames)
+                .collect { (chunk, done) ->
+                    if (done && chunk.isNotBlank()) {
+                        val response = chunk.trim()
+
+                        // Check if object was found
+                        if (response.contains("FOUND IT", ignoreCase = true)) {
+                            navigationCueFlow.emit(
+                                NavigationCue.InformationalAlert("$target found! $response", true)
+                            )
+                            // End the session when object is found
+                            twoPhasePromptManager.endSession(sessionId)
+                            onObjectFound()
+                        } else {
+                            // Continue searching
+                            navigationCueFlow.emit(
+                                NavigationCue.AmbientUpdate(response, done)
+                            )
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during object finding: ${e.message}")
+            navigationCueFlow.emit(
+                NavigationCue.InformationalAlert("Object search temporarily unavailable", true)
             )
         }
     }
