@@ -59,12 +59,14 @@ class AiOperationHelper @Inject constructor(
 
     fun generateResponse(
         prompt: String,
-        bitmap: Bitmap
+        bitmap: Bitmap,
+        useHighResolution: Boolean = false
     ): Flow<Pair<String, Boolean>> = flow {
         try {
             gemmaDataSource.generateResponse(
                 prompt,
-                listOf(TimestampedFrame(bitmap, System.currentTimeMillis()))
+                listOf(TimestampedFrame(bitmap, System.currentTimeMillis())),
+                useHighResolution
             ).collect { (chunk, isDone) ->
                 emit(Pair(chunk, isDone))
             }
@@ -77,10 +79,12 @@ class AiOperationHelper @Inject constructor(
 
     fun generateResponse(
         prompt: String,
-        frames: List<TimestampedFrame>
+        frames: List<TimestampedFrame>,
+        useHighResolution: Boolean = false
     ): Flow<Pair<String, Boolean>> = flow {
         try {
-            gemmaDataSource.generateResponse(prompt, frames).collect { (chunk, isDone) ->
+            gemmaDataSource.generateResponse(prompt, frames, useHighResolution)
+                .collect { (chunk, isDone) ->
                 emit(Pair(chunk, isDone))
             }
         } catch (e: Exception) {

@@ -30,11 +30,13 @@ interface AiDataSource {
      *
      * @param prompt The prompt to guide the description generation
      * @param frames List of timestamped frames (typically 2-3 frames over 150-300ms)
+     * @param useHighResolution Whether to use original image resolution (for OCR tasks)
      * @return A flow of pairs containing the scene description and completion status
      */
     fun generateResponse(
         prompt: String,
-        frames: List<TimestampedFrame>
+        frames: List<TimestampedFrame>,
+        useHighResolution: Boolean = false
     ): Flow<Pair<String, Boolean>>
 
 
