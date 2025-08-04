@@ -33,18 +33,31 @@ fun HandleCameraPermission(
     if (allGranted) {
         onPermissionGranted()
     } else {
-        LaunchedEffect(Unit) {
-            if (!cameraPermissionState.status.isGranted) cameraPermissionState.launchPermissionRequest()
-            if (!audioPermissionState.status.isGranted) audioPermissionState.launchPermissionRequest()
+        // Request permissions sequentially to avoid Android permission dialog conflicts
+        LaunchedEffect(cameraPermissionState.status.isGranted) {
+            if (!cameraPermissionState.status.isGranted) {
+                cameraPermissionState.launchPermissionRequest()
+            } else if (!audioPermissionState.status.isGranted) {
+                // Only request audio permission after camera permission is granted
+                audioPermissionState.launchPermissionRequest()
+            }
         }
 
         if (cameraPermissionState.status.shouldShowRationale || audioPermissionState.status.shouldShowRationale) {
             // Provide a simple explanation UI for missing permissions.
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Camera and microphone permissions are required for Lumina to work.")
+                val missingPermissions = mutableListOf<String>()
+                if (!cameraPermissionState.status.isGranted) missingPermissions.add("Camera")
+                if (!audioPermissionState.status.isGranted) missingPermissions.add("Microphone")
+
+                Text("${missingPermissions.joinToString(" and ")} permission${if (missingPermissions.size > 1) "s are" else " is"} required for Lumina to work.")
                 Button(onClick = {
-                    cameraPermissionState.launchPermissionRequest()
-                    audioPermissionState.launchPermissionRequest()
+                    // Request permissions sequentially
+                    if (!cameraPermissionState.status.isGranted) {
+                        cameraPermissionState.launchPermissionRequest()
+                    } else if (!audioPermissionState.status.isGranted) {
+                        audioPermissionState.launchPermissionRequest()
+                    }
                 }, modifier = Modifier.padding(top = 8.dp)) {
                     Text("Grant permissions")
                 }

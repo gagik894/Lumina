@@ -26,9 +26,11 @@ class TtsPreprocessingService @Inject constructor() {
     fun preprocessForTts(text: String): String {
         var processed = text
 
-        // Apply preprocessing in order of importance - structured text first
+        // Apply preprocessing in order of importance
+        processed =
+            preprocessStructuredLabels(processed) // Run first to establish sentence structure
         processed = preprocessUrls(processed)
-        processed = preprocessEmails(processed)
+        processed = preprocessEmails(processed) 
         processed = preprocessCurrency(processed)
         processed = preprocessDates(processed)
         processed = preprocessTimes(processed)
@@ -51,7 +53,7 @@ class TtsPreprocessingService @Inject constructor() {
     private fun preprocessUrls(text: String): String {
         var result = text
 
-        // Full URLs with protocol
+        // Full URLs with protocol - these are clearly URLs
         result = result.replace(
             Regex(
                 "https?://([\\w.-]+(?:/[\\w.-]*)*)",
@@ -65,13 +67,13 @@ class TtsPreprocessingService @Inject constructor() {
             "$protocol colon slash slash $processedDomain"
         }
 
-        // Domain names (www.example.com or example.com)
+        // Only process domains that are clearly websites (www. prefix or common TLD patterns)
+        // Avoid processing random words with dots that might be end of sentences
         result =
-            result.replace(Regex("\\b(?:www\\.)?([a-zA-Z0-9-]+(?:\\.[a-zA-Z]{2,})+)\\b")) { match ->
+            result.replace(Regex("\\b(?:www\\.|([a-zA-Z0-9-]+\\.(?:com|org|net|edu|gov|io|co|uk|de|fr|jp|au|ca|us|info|biz)(?:\\.[a-zA-Z]{2})?))\\b")) { match ->
                 val domain = match.value
                 if (domain.startsWith("www.")) {
-                    val processed = domain.replace("www.", "w w w dot ").replace(".", " dot ")
-                    processed
+                    domain.replace("www.", "w w w dot ").replace(".", " dot ")
                 } else {
                     domain.replace(".", " dot ")
                 }
@@ -96,6 +98,34 @@ class TtsPreprocessingService @Inject constructor() {
         }
 
         return result
+    }
+
+    /**
+     * Handles structured labels for better readability.
+     * Examples:
+     * - "Address: 123 Main St" → "Address: 123 Main St."
+     * - "Phone: 555-1234" → "Phone: 555-1234."
+     * - "Email: user@example.com" → "Email: user@example.com."
+     */
+    private fun preprocessStructuredLabels(text: String): String {
+        // Regex to find labels like "Address:", "Phone:", "Email:", etc.
+        val labelRegex = Regex("""\b([A-Za-z\s]+:)\s*""")
+
+        // First, handle multiple labels on the same line by replacing the comma separator with a period.
+        // This creates a pause between items like "Email: ..., Phone: ..."
+        var processedText = text.replace(Regex(""",\s*(\b[A-Za-z\s]+:)"""), ". $1")
+
+        // Second, ensure that any line containing a label ends with a sentence-terminating punctuation.
+        // This handles cases where a line has one label and no trailing punctuation.
+        return processedText.lines().joinToString("\n") { line ->
+            val trimmedLine = line.trim()
+            // Check if the line contains a label and doesn't already end with punctuation.
+            if (labelRegex.containsMatchIn(trimmedLine) && !trimmedLine.matches(Regex(".*[.!?]$"))) {
+                trimmedLine + "."
+            } else {
+                line // Return original line to preserve original whitespace if no changes are made
+            }
+        }
     }
 
     /**
@@ -288,30 +318,35 @@ class TtsPreprocessingService @Inject constructor() {
      * Examples:
      * - "Dr." → "Doctor"
      * - "St." → "Street"
+     * - "Str," → "Street,"
      * - "Inc." → "Incorporated"
      */
     private fun preprocessAbbreviations(text: String): String {
         var result = text
 
         val abbreviations = mapOf(
-            "Dr\\." to "Doctor",
-            "St\\." to "Street",
-            "Str\\." to "Street",
-            "Ave\\." to "Avenue",
-            "Blvd\\." to "Boulevard",
-            "Inc\\." to "Incorporated",
+            "Dr" to "Doctor",
+            "St" to "Street",
+            "Str" to "Street",
+            "Ave" to "Avenue",
+            "Blvd" to "Boulevard",
+            "Inc" to "Incorporated",
             "LLC" to "L L C",
-            "Ltd\\." to "Limited",
-            "Corp\\." to "Corporation",
-            "Co\\." to "Company",
-            "Dept\\." to "Department",
-            "Mgr\\." to "Manager",
-            "Qty\\." to "Quantity",
-            "Ref\\." to "Reference"
+            "Ltd" to "Limited",
+            "Corp" to "Corporation",
+            "Co" to "Company",
+            "Dept" to "Department",
+            "Mgr" to "Manager",
+            "Qty" to "Quantity",
+            "Ref" to "Reference"
         )
 
         abbreviations.forEach { (abbrev, expansion) ->
-            result = result.replace(Regex("\\b$abbrev\\b", RegexOption.IGNORE_CASE), expansion)
+            // Match abbreviation followed by punctuation or end of word
+            result = result.replace(
+                Regex("\\b$abbrev(?=[.,;:!?\\s]|$)", RegexOption.IGNORE_CASE),
+                expansion
+            )
         }
 
         return result
