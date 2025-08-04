@@ -197,7 +197,12 @@ class SceneExplorerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val stream = ByteArrayOutputStream()
-                image.compress(Bitmap.CompressFormat.JPEG, 50, stream)
+                val quality = if (cameraMode.value == CameraStateService.CameraMode.TEXT_READING) {
+                    95 // High quality for reading tasks
+                } else {
+                    50 // Standard quality for navigation and other tasks
+                }
+                image.compress(Bitmap.CompressFormat.JPEG, quality, stream)
                 val bytes = stream.toByteArray()
                 lastFrameBytes = bytes
                 processFrame(ImageInput(bytes))
@@ -302,6 +307,11 @@ class SceneExplorerViewModel @Inject constructor(
 
             is VoiceCommand.Unknown -> {
                 handleTts.speak("Command not recognized", _ttsState.value)
+                hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.ERROR)
+            }
+
+            is VoiceCommand.Help -> {
+                provideHelp()
             }
         }
     }
@@ -316,6 +326,7 @@ class SceneExplorerViewModel @Inject constructor(
      */
     fun optimisticallyActivateCamera() {
         manageCameraOperations.optimisticallyActivateCamera()
+        hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.LISTENING)
         Log.d(TAG, "🎤📸 Optimistically activated camera for voice command")
     }
 
@@ -477,6 +488,7 @@ class SceneExplorerViewModel @Inject constructor(
             } catch (e: Exception) {
                 deactivateTextReadingMode()
                 handleTts.speak("Error identifying currency. Please try again.", _ttsState.value)
+                hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.ERROR)
             }
         }
     }
@@ -512,6 +524,7 @@ class SceneExplorerViewModel @Inject constructor(
             } catch (e: Exception) {
                 deactivateTextReadingMode()
                 handleTts.speak("Error reading receipt. Please try again.", _ttsState.value)
+                hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.ERROR)
             }
         }
     }
@@ -547,8 +560,25 @@ class SceneExplorerViewModel @Inject constructor(
             } catch (e: Exception) {
                 deactivateTextReadingMode()
                 handleTts.speak("Error reading text. Please try again.", _ttsState.value)
+                hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.ERROR)
             }
         }
+    }
+
+    /**
+     * Provides interactive help for available voice commands.
+     */
+    private fun provideHelp() {
+        val helpMessage = """
+            You can ask me to do many things. For example:
+            'Start navigation' to begin guidance.
+            'Read text' to read signs or documents.
+            'Find my keys' to locate an object.
+            'What's this currency?' to identify money.
+            Or, just ask a question about your surroundings.
+            What would you like to do?
+        """.trimIndent()
+        handleTts.speak(helpMessage, _ttsState.value)
     }
 
     // Utility methods

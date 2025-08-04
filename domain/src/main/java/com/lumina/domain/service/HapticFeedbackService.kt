@@ -28,6 +28,12 @@ interface HapticFeedbackService {
         /** Success pattern for completed actions */
         SUCCESS,
 
+        /** Failure or error pattern */
+        ERROR,
+
+        /** Short vibration to indicate the app is listening */
+        LISTENING,
+
         /** Direction indicators - left, right, forward */
         DIRECTION_LEFT,
         DIRECTION_RIGHT,

@@ -22,6 +22,7 @@ abstract class ImageBasedOperation(
     protected abstract fun getOperationName(): String
     protected abstract fun getPrompt(image: ImageInput): String
     protected open fun getMultiFramePrompt(): String = ""
+    protected open fun useHighResolution(): Boolean = false
 
     fun execute(image: ImageInput): Flow<NavigationCue> {
         return callbackFlow {
@@ -34,7 +35,7 @@ abstract class ImageBasedOperation(
 
                     try {
                         aiOperationHelper.withAiOperation {
-                            aiOperationHelper.generateResponse(prompt, bitmap)
+                            aiOperationHelper.generateResponse(prompt, bitmap, useHighResolution())
                                 .collect { (chunk, done) ->
                                     trySend(NavigationCue.InformationalAlert(chunk, done))
                                     if (done) close()
@@ -85,7 +86,11 @@ abstract class ImageBasedOperation(
                     try {
                         val prompt = getMultiFramePrompt()
                         aiOperationHelper.withAiOperation {
-                            aiOperationHelper.generateResponse(prompt, qualityFrames)
+                            aiOperationHelper.generateResponse(
+                                prompt,
+                                qualityFrames,
+                                useHighResolution()
+                            )
                                 .collect { (chunk, done) ->
                                     trySend(NavigationCue.InformationalAlert(chunk, done))
                                     if (done) close()
@@ -125,6 +130,7 @@ class IdentifyCurrencyOperation @Inject constructor(
         promptGenerator.generateCurrencyIdentificationPrompt()
 
     override fun getMultiFramePrompt() = promptGenerator.generateMultiFrameCurrencyPrompt()
+    override fun useHighResolution() = true
 }
 
 class ReadReceiptOperation @Inject constructor(
@@ -141,6 +147,7 @@ class ReadReceiptOperation @Inject constructor(
     override fun getOperationName() = "read_receipt"
     override fun getPrompt(image: ImageInput) = promptGenerator.generateReceiptReadingPrompt()
     override fun getMultiFramePrompt() = promptGenerator.generateMultiFrameReceiptPrompt()
+    override fun useHighResolution() = true
 }
 
 class ReadTextOperation @Inject constructor(
@@ -157,4 +164,5 @@ class ReadTextOperation @Inject constructor(
     override fun getOperationName() = "read_text"
     override fun getPrompt(image: ImageInput) = promptGenerator.generateTextReadingPrompt()
     override fun getMultiFramePrompt() = promptGenerator.generateMultiFrameTextPrompt()
+    override fun useHighResolution() = true
 }

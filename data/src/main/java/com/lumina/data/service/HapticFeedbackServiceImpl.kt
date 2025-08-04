@@ -44,18 +44,19 @@ class HapticFeedbackServiceImpl @Inject constructor(
         }
 
         val vibrationPattern = getVibrationPattern(pattern)
+        val repeat = -1 // No looping patterns
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val effect = VibrationEffect.createWaveform(
                     vibrationPattern.timings,
                     vibrationPattern.amplitudes,
-                    -1 // Don't repeat
+                    repeat
                 )
                 vibrator?.vibrate(effect)
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(vibrationPattern.timings, -1)
+                vibrator?.vibrate(vibrationPattern.timings, repeat)
             }
 
             Log.d(TAG, "Triggered haptic pattern: $pattern")
@@ -106,6 +107,18 @@ class HapticFeedbackServiceImpl @Inject constructor(
                 VibrationPattern(
                     timings = longArrayOf(0, 50, 50, 100),
                     amplitudes = intArrayOf(0, 180, 0, 220)
+                )
+
+            HapticFeedbackService.HapticPattern.ERROR ->
+                VibrationPattern(
+                    timings = longArrayOf(0, 80, 50, 80),
+                    amplitudes = intArrayOf(0, 255, 0, 255)
+                )
+
+            HapticFeedbackService.HapticPattern.LISTENING ->
+                VibrationPattern(
+                    timings = longArrayOf(0, 70),
+                    amplitudes = intArrayOf(0, 150)
                 )
 
             HapticFeedbackService.HapticPattern.DIRECTION_LEFT ->

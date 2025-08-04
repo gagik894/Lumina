@@ -18,5 +18,6 @@ sealed class VoiceCommand {
     data class AskQuestion(val question: String) : VoiceCommand()
     data object ToggleHaptic : VoiceCommand()
     data object TestHaptic : VoiceCommand()
+    data object Help : VoiceCommand()
     data class Unknown(val originalCommand: String) : VoiceCommand()
 }

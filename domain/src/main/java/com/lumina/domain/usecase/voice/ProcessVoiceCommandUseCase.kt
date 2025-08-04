@@ -67,6 +67,10 @@ class ProcessVoiceCommandUseCase @Inject constructor() {
                 VoiceCommand.TestHaptic
             }
 
+            lower == "help" || lower == "help me" -> {
+                VoiceCommand.Help
+            }
+
             lower.startsWith("question") -> {
                 val question = lower.removePrefix("question").trim()
                 if (question.isNotEmpty()) {

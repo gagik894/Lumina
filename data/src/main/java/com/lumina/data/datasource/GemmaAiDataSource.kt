@@ -63,7 +63,7 @@ class GemmaAiDataSource @Inject constructor(
     private val maxTokens = 3500
 
     /** Maximum image dimension for processing to prevent OOM */
-    private val maxImageDimension = 512
+    private val maxImageDimension = 1024
 
     private val _initializationState =
         MutableStateFlow<InitializationState>(InitializationState.NotInitialized)
@@ -155,7 +155,8 @@ class GemmaAiDataSource @Inject constructor(
      */
     override fun generateResponse(
         prompt: String,
-        frames: List<TimestampedFrame>
+        frames: List<TimestampedFrame>,
+        useHighResolution: Boolean
     ): Flow<Pair<String, Boolean>> = callbackFlow {
         if (!generationMutex.tryLock()) {
             Log.w(TAG, "Concurrent call to generateResponse detected, ignoring.")
@@ -177,7 +178,7 @@ class GemmaAiDataSource @Inject constructor(
 
             // Add frames in chronological order
             frames.forEach { frame ->
-                val scaledBitmap = scaleImageForProcessing(frame.bitmap)
+                val scaledBitmap = scaleImageForProcessing(frame.bitmap, useHighResolution)
                 currentSession.addImage(BitmapImageBuilder(scaledBitmap).build())
 
                 // Clean up if we created a new bitmap
@@ -240,8 +241,13 @@ class GemmaAiDataSource @Inject constructor(
 
     /**
      * Scales image to optimal size for processing, preventing OOM while maintaining quality.
+     * For high-resolution tasks, the image is not scaled down.
      */
-    private fun scaleImageForProcessing(bitmap: Bitmap): Bitmap {
+    private fun scaleImageForProcessing(bitmap: Bitmap, isHighResolution: Boolean): Bitmap {
+        if (isHighResolution) {
+            return bitmap // Use original resolution for OCR tasks
+        }
+
         val width = bitmap.width
         val height = bitmap.height
 

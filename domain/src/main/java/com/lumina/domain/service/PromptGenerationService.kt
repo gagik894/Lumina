@@ -226,7 +226,9 @@ class PromptGenerationService @Inject constructor() {
      * @return Contextualized prompt for question answering
      */
     fun generateQuestionAnsweringPrompt(question: String): String {
-        return "Based on the image, answer the user's question: $question"
+        return "Based on the image, answer the user's question: $question. " +
+                "If you are not certain, express your uncertainty. For example, say 'It looks like...' or 'I think...'. " +
+                "Provide a confidence level if possible, e.g., 'I'm about 80% sure'."
     }
 
     /**
