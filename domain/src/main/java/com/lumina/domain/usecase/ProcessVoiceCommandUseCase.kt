@@ -4,10 +4,14 @@ import com.lumina.domain.model.VoiceCommand
 import javax.inject.Inject
 
 /**
- * Use case for parsing and processing voice commands.
+ * Use case responsible for processing raw voice command strings and converting them into structured
+ * [VoiceCommand] objects.
  *
- * Extracts voice command parsing logic from the ViewModel and provides
- * structured command objects for the presentation layer to handle.
+ * This class encapsulates the logic for interpreting various voice commands, such as finding objects,
+ * starting or stopping navigation, reading text, and asking questions.
+ *
+ * It provides a single method [processCommand] that takes a raw command string and returns a
+ * corresponding [VoiceCommand].
  */
 class ProcessVoiceCommandUseCase @Inject constructor() {
 

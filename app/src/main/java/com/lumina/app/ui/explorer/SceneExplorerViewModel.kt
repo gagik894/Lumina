@@ -45,7 +45,8 @@ import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 
 /**
- * Data class representing the UI state for the Scene Explorer screen.
+ * Encapsulates all UI state data for the Scene Explorer screen.
+ * Combines initialization status, dynamic content, and feature availability.
  */
 data class SceneExplorerUiState(
     val description: String = "",
@@ -55,13 +56,17 @@ data class SceneExplorerUiState(
 )
 
 /**
- * Refactored ViewModel with business logic extracted to domain use cases.
+ * Presentation layer coordinator for Scene Explorer functionality.
  *
- * This ViewModel now focuses on:
- * - UI state management
- * - Coordinating use cases
- * - Handling UI events
- * - Managing coroutine scopes
+ * Responsibilities:
+ * - Manages UI state transitions and reactive flows
+ * - Coordinates between domain use cases and UI layer
+ * - Handles coroutine lifecycle and cancellation
+ * - Maintains frame buffer for on-demand operations
+ * - Bridges voice commands to appropriate domain actions
+ *
+ * Architecture Note: Business logic extracted to domain use cases,
+ * leaving this ViewModel focused on presentation concerns only.
  */
 @HiltViewModel
 class SceneExplorerViewModel @Inject constructor(
@@ -89,22 +94,26 @@ class SceneExplorerViewModel @Inject constructor(
         private const val TAG = "SceneExplorerViewModel"
     }
 
+    // TTS state tracking - separate from service to handle initialization lifecycle
     private var isTtsInitialized = false
     private val _ttsState = MutableStateFlow(false)
 
-    // Frame management
+    // Cached frame for immediate reuse in on-demand operations (investigate, voice commands)
+    // Avoids waiting for next camera callback when user requests immediate analysis
     private var lastFrameBytes: ByteArray? = null
 
-    // Manual cue flow for user-initiated actions
+    // Bridges user-initiated actions (voice, gestures) into the main navigation pipeline
+    // Allows manual cues to be processed alongside automatic camera-driven cues
     private val manualCueFlow = MutableSharedFlow<NavigationCue>()
 
-    // Job management
+    // Coroutine job lifecycle management for concurrent operations
+    // Each operation type gets its own job to allow selective cancellation
     private var findJob: Job? = null
     private var crossingJob: Job? = null
     private var questionJob: Job? = null
     private var navigationJob: Job? = null
 
-    // Camera state management
+    // Camera state observation - exposed as StateFlow for UI binding
     val cameraMode = cameraStateService.currentMode
     val isCameraActive = cameraStateService.isActive
 
@@ -200,7 +209,12 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
-     * Generates scene description using domain use case.
+     * Triggers on-demand scene analysis using the most recently captured frame.
+     *
+     * Provides detailed environmental description for user orientation and context.
+     * Uses cached frame data to avoid camera activation delays during user interaction.
+     * Results are delivered through the standard NavigationCue pipeline for consistent
+     * UI presentation and TTS integration.
      */
     fun investigateScene() {
         val bytes = lastFrameBytes ?: return
@@ -212,7 +226,14 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
-     * Handles voice commands using domain use case.
+     * Processes raw voice input and executes corresponding system operations.
+     *
+     * Delegates command parsing to domain layer for consistent interpretation,
+     * then coordinates appropriate use case execution. Provides immediate audio
+     * feedback for command acknowledgment and error states. Manages camera
+     * resources optimistically for commands requiring visual input.
+     *
+     * @param command Raw voice input string from speech recognition
      */
     fun handleVoiceCommand(command: String) {
         val voiceCommand = processVoiceCommand.processCommand(command)
@@ -276,14 +297,26 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
-     * Optimistically activates camera for voice commands.
+     * Preemptively activates camera hardware for anticipated voice commands.
+     *
+     * Reduces response latency for visual operations by starting camera initialization
+     * during speech recognition. Uses TEXT_READING mode for optimal resolution across
+     * multiple operation types. Camera is automatically deactivated if the command
+     * doesn't require visual input.
      */
     fun optimisticallyActivateCamera() {
         manageCameraOperations.optimisticallyActivateCamera()
         Log.d(TAG, "🎤📸 Optimistically activated camera for voice command")
     }
 
-    // Simplified operation methods that delegate to domain use cases
+    /**
+     * Initiates continuous environmental navigation assistance.
+     *
+     * Activates real-time scene analysis for mobility guidance, obstacle detection,
+     * and path optimization. Manages camera in NAVIGATION mode for optimal field
+     * of view and processing frequency. Automatically handles resource cleanup
+     * and error recovery with user feedback.
+     */
     fun startNavigation() {
         navigationJob?.cancel()
         navigationJob = viewModelScope.launch(Dispatchers.IO) {
@@ -305,6 +338,13 @@ class SceneExplorerViewModel @Inject constructor(
         handleTts.speak("Navigation started", _ttsState.value)
     }
 
+    /**
+     * Terminates active navigation session and releases camera resources.
+     *
+     * Safely cancels ongoing navigation operations, stops all background processing,
+     * and deactivates camera hardware for power conservation. Provides audio
+     * confirmation of operation termination.
+     */
     fun stopNavigationAndCamera() {
         navigationJob?.cancel()
         navigationJob = null
@@ -313,6 +353,16 @@ class SceneExplorerViewModel @Inject constructor(
         handleTts.speak("Navigation stopped", _ttsState.value)
     }
 
+    /**
+     * Initiates targeted object detection and location guidance.
+     *
+     * Activates AI-powered visual search for specified objects with real-time
+     * directional feedback. Uses navigation camera mode for optimal detection
+     * accuracy. Session automatically terminates upon successful object location
+     * or user cancellation.
+     *
+     * @param target Object description or name to locate
+     */
     fun startFindMode(target: String) {
         findJob?.cancel()
         findJob = viewModelScope.launch(Dispatchers.IO) {
@@ -336,6 +386,14 @@ class SceneExplorerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Initiates specialized street crossing assistance mode.
+     *
+     * Provides real-time guidance for safe street traversal including traffic
+     * light detection, pedestrian signal monitoring, and vehicle approach warnings.
+     * Automatically manages session lifecycle with completion detection and
+     * resource cleanup.
+     */
     private fun startCrossingMode() {
         crossingJob?.cancel()
         crossingJob = viewModelScope.launch(Dispatchers.IO) {
@@ -359,6 +417,15 @@ class SceneExplorerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Processes natural language questions with optional visual context.
+     *
+     * Handles both text-based queries and visual questions that require current
+     * scene analysis. Results are delivered through the NavigationCue pipeline
+     * for consistent presentation and TTS integration.
+     *
+     * @param question User's natural language query
+     */
     private fun askQuestion(question: String) {
         questionJob?.cancel()
         questionJob = viewModelScope.launch {
@@ -368,6 +435,14 @@ class SceneExplorerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Performs currency identification using current camera frame.
+     *
+     * Activates high-resolution camera mode for optimal text and symbol recognition.
+     * Provides detailed analysis of bills, coins, and denomination values.
+     * Automatically manages camera lifecycle and provides user feedback for
+     * missing frames or processing errors.
+     */
     private fun identifyCurrencyFromFrame() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -396,6 +471,13 @@ class SceneExplorerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Performs receipt and document text extraction using current camera frame.
+     *
+     * Utilizes specialized OCR processing optimized for structured document layouts.
+     * Extracts itemized information, totals, and merchant details with high accuracy.
+     * Manages camera activation and provides user feedback for processing status.
+     */
     private fun readReceiptFromFrame() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -424,6 +506,13 @@ class SceneExplorerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Performs general text recognition using current camera frame.
+     *
+     * Provides OCR capabilities for signs, labels, books, and other text content.
+     * Optimized for various text sizes, fonts, and lighting conditions.
+     * Includes automatic camera management and error handling with user feedback.
+     */
     private fun readTextFromFrame() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -453,6 +542,13 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     // Utility methods
+
+    /**
+     * Initializes Text-to-Speech service with callback handling for success and error states.
+     *
+     * Manages TTS state transitions and provides logging for debugging initialization issues.
+     * Updates internal state flow to enable reactive TTS processing throughout the application.
+     */
     private fun initializeTextToSpeech() {
         textToSpeechService.initialize(
             onInitialized = {
@@ -466,17 +562,37 @@ class SceneExplorerViewModel @Inject constructor(
         )
     }
 
+    /**
+     * Deactivates camera and clears processing buffers after text reading operations.
+     *
+     * Ensures proper resource cleanup and power conservation when text analysis
+     * operations are complete. Stops all background processing to free memory.
+     */
     private fun deactivateTextReadingMode() {
         manageCameraOperations.deactivateCamera()
         stopAllOperations()
     }
 
+    /**
+     * Deactivates the camera if it was optimistically activated and clears the frame buffer.
+     *
+     * This function is typically called when a voice command that doesn't require visual input
+     * is processed, or when an operation that might have optimistically activated the camera
+     * completes or is cancelled. It ensures that camera resources are released and the last
+     * captured frame is cleared to prevent outdated data from being used.
+     */
     private fun deactivateCameraAndClearBuffer() {
         manageCameraOperations.deactivateCamera()
         stopAllOperations()
         Log.d(TAG, "🎤🔴 Deactivated optimistic camera and cleared buffer")
     }
 
+    /**
+     * Cancels all active operations and performs comprehensive resource cleanup.
+     *
+     * Safely terminates concurrent jobs, releases camera hardware, and clears
+     * processing buffers. Used for emergency stops and application shutdown.
+     */
     private fun stopAllActiveOperations() {
         findJob?.cancel()
         findJob = null
@@ -488,19 +604,19 @@ class SceneExplorerViewModel @Inject constructor(
         deactivateCameraAndClearBuffer()
     }
 
-    // Simple delegation methods
-    fun repeatCurrentDescription() {
-        val currentDescription = uiState.value.description
-        if (currentDescription.isNotEmpty() && isTtsInitialized) {
-            textToSpeechService.speak(currentDescription)
-        }
-    }
 
-    fun stopSpeech() = handleTts.stopSpeech()
-    fun setSpeechRate(rate: Float) = handleTts.setSpeechRate(rate)
     fun speak(text: String) = handleTts.speak(text, _ttsState.value)
     fun isSpeaking(): Boolean = handleTts.isSpeaking()
 
+    /**
+     * Called when the ViewModel is no longer used and will be destroyed.
+     * This is the place to clean up resources, cancel jobs, and release services.
+     *
+     * Actions performed:
+     * - Stops all active operations (find, crossing, navigation).
+     * - Shuts down the Text-to-Speech service.
+     * - Deactivates the camera.
+     */
     override fun onCleared() {
         super.onCleared()
         stopAllActiveOperations()

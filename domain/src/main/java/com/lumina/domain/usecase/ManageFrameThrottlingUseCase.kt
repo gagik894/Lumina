@@ -2,11 +2,21 @@ package com.lumina.domain.usecase
 
 import javax.inject.Inject
 
+
 /**
  * Use case for managing frame processing throttling logic.
  *
  * Contains the business rules for frame throttling without Android dependencies.
  * This keeps the domain layer pure while providing throttling logic.
+ * The primary purpose is to prevent overwhelming the MediaPipe framework with too many frames,
+ * which can lead to timestamp-related errors and performance issues. By throttling
+ * the frame input, we ensure a smoother and more stable processing pipeline.
+ *
+ * The `frameThrottleInterval` is set to 100ms, aiming for a maximum of 10 frames per second.
+ * This interval can be adjusted based on performance needs and device capabilities.
+ *
+ * The class maintains state (`isProcessingFrame`, `lastFrameProcessedTime`) to make decisions
+ * about whether a new frame should be processed or dropped.
  */
 class ManageFrameThrottlingUseCase @Inject constructor() {
 

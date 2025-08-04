@@ -6,11 +6,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onEach
 import javax.inject.Inject
 
+
 /**
  * Use case for handling TTS integration with NavigationCues.
  *
  * Extracts TTS processing logic from the ViewModel and provides
  * a clean domain interface for speech synthesis.
+ * This class is responsible for converting `NavigationCue` objects into audible speech
+ * using the provided `TextToSpeechService`. It also offers methods to control
+ * speech playback, such as stopping speech, setting the speech rate, and checking
+ * if the TTS engine is currently speaking.
+ *
+ * @property textToSpeechService The service responsible for the actual text-to-speech conversion.
  */
 class HandleTtsUseCase @Inject constructor(
     private val textToSpeechService: TextToSpeechService

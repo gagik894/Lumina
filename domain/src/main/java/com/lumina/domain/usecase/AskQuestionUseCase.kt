@@ -7,6 +7,10 @@ import javax.inject.Inject
 
 /**
  * Use case for asking questions about the current scene.
+ *
+ * This use case allows the user to ask a question about the current scene and receive navigation cues
+ * as a response. It interacts with the [LuminaRepository] to process the question and generate
+ * the appropriate navigation cues.
  */
 class AskQuestionUseCase @Inject constructor(
     private val repository: LuminaRepository

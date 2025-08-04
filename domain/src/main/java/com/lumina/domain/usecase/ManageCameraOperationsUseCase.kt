@@ -4,11 +4,24 @@ import com.lumina.domain.service.CameraStateService
 import kotlinx.coroutines.delay
 import javax.inject.Inject
 
+
 /**
  * Use case for managing camera operations and frame capture.
  *
- * Extracts camera management logic from the ViewModel and provides
- * domain-level operations for camera handling.
+ * This class encapsulates the logic related to controlling the camera,
+ * such as activating it for different modes (text reading, navigation),
+ * deactivating it, and capturing frames. It abstracts the underlying
+ * `CameraStateService` and provides higher-level operations that can be
+ * used by ViewModels or other domain components.
+ *
+ * The primary responsibilities include:
+ * - Switching camera modes (text reading, navigation).
+ * - Activating/deactivating the camera.
+ * - Providing mechanisms to wait for and capture single or multiple camera frames.
+ *
+ * This use case helps in separating concerns by moving camera-specific logic
+ * out of the presentation layer and into the domain layer, making the codebase
+ * more modular and testable.
  */
 class ManageCameraOperationsUseCase @Inject constructor(
     private val cameraStateService: CameraStateService
