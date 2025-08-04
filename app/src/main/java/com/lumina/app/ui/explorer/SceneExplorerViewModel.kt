@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -112,7 +113,7 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
-     * Main navigation cue flow with TTS processing handled by use case.
+     * Main navigation cue flow with reactive TTS processing.
      */
     private val navigationCueFlow = merge(
         cameraStateService.currentMode.flatMapLatest { mode ->
@@ -123,8 +124,30 @@ class SceneExplorerViewModel @Inject constructor(
             }
         },
         manualCueFlow
-    ).let { flow ->
-        handleTts.processNavigationCues(flow, _ttsState.value)
+    ).onEach { navigationCue ->
+        // Handle TTS reactively based on current state
+        Log.d(
+            TAG,
+            "🔊 Processing NavigationCue: ${navigationCue.javaClass.simpleName}, TTS enabled: ${_ttsState.value}"
+        )
+
+        if (_ttsState.value) {
+            val message = when (navigationCue) {
+                is NavigationCue.CriticalAlert -> navigationCue.message
+                is NavigationCue.InformationalAlert -> navigationCue.message
+                is NavigationCue.AmbientUpdate -> navigationCue.message
+            }
+
+            // Skip empty strings generated while the model is thinking
+            if (message.isNotBlank()) {
+                Log.d(TAG, "🎤 Speaking message: '$message'")
+                textToSpeechService.speak(navigationCue)
+            } else {
+                Log.d(TAG, "🤐 Skipping empty message")
+            }
+        } else {
+            Log.d(TAG, "🔇 TTS disabled, not speaking")
+        }
     }
 
     /**
