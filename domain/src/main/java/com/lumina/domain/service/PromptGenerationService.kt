@@ -339,10 +339,7 @@ class PromptGenerationService @Inject constructor() {
      */
     fun generateMultiFrameCurrencyPrompt(): String {
         return "You will receive multiple frames showing the same currency " +
-                "Analyze all frames to identify the currency with maximum accuracy. " +
-                "State the exact denomination and currency, for example, '10 US Dollars' or '5 Euro'. " +
-                "Use information from all frames to provide the most accurate identification. You can use color and other identifications if written denomination isn't visible" +
-                "Be precise and clear. DON'T GUESS"
+                generateCurrencyIdentificationPrompt()
     }
 
     /**
@@ -355,10 +352,7 @@ class PromptGenerationService @Inject constructor() {
      */
     fun generateMultiFrameReceiptPrompt(): String {
         return "You will receive multiple frames showing the same receipt or document from slightly different angles. " +
-                "Analyze all frames to extract the most complete and accurate information. " +
-                "Start with the business name and date if visible. List the main items and their prices, " +
-                "the total amount, and payment method if shown. Do not read receipt numbers, bar codes, or irrelevant details. " +
-                "Use information from all frames to provide the most complete reading. Be organized and speak clearly."
+                generateReceiptReadingPrompt()
     }
 
     /**
@@ -371,9 +365,7 @@ class PromptGenerationService @Inject constructor() {
      */
     fun generateMultiFrameTextPrompt(): String {
         return "You will receive multiple frames showing the same text or document from slightly different angles or lighting. " +
-                "Analyze all frames to read the text with maximum accuracy and completeness. " +
-                "Start with the largest or most prominent text, then continue with smaller details. " +
-                "Use information from all frames to provide the most complete and accurate reading. Organize the information logically."
+                generateTextReadingPrompt()
     }
 
     /**

@@ -102,10 +102,6 @@ class TtsPreprocessingService @Inject constructor() {
 
     /**
      * Handles structured labels for better readability.
-     * Examples:
-     * - "Address: 123 Main St" → "Address: 123 Main St."
-     * - "Phone: 555-1234" → "Phone: 555-1234."
-     * - "Email: user@example.com" → "Email: user@example.com."
      */
     private fun preprocessStructuredLabels(text: String): String {
         // Regex to find labels like "Address:", "Phone:", "Email:", etc.
