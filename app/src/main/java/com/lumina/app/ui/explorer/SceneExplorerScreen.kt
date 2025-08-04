@@ -18,15 +18,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +40,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.lumina.app.ui.camera.CameraScreen
 import com.lumina.app.ui.common.HandleCameraPermission
 import com.lumina.domain.model.InitializationState
+import com.lumina.domain.model.NavigationCueType
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -285,53 +282,6 @@ private fun InitializationScreen(isTtsInitialized: Boolean) {
                 text = if (isTtsInitialized) "Text-to-Speech Ready" else "Text-to-Speech...",
                 modifier = Modifier.padding(start = 12.dp)
             )
-        }
-    }
-}
-
-/**
- * Control panel for text-to-speech functionality.
- */
-@Composable
-private fun TtsControlPanel(
-    onRepeat: () -> Unit,
-    onStop: () -> Unit,
-    isTtsInitialized: Boolean,
-    modifier: Modifier = Modifier
-) {
-    if (!isTtsInitialized) return
-
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            IconButton(
-                onClick = onRepeat,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Repeat description",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            IconButton(
-                onClick = onStop,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Stop,
-                    contentDescription = "Stop speech",
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
         }
     }
 }
