@@ -1,4 +1,4 @@
-package com.lumina.domain.usecase
+package com.lumina.domain.usecase.navigation
 
 import com.lumina.domain.repository.LuminaRepository
 import javax.inject.Inject

@@ -1,4 +1,4 @@
-package com.lumina.domain.usecase
+package com.lumina.domain.usecase.text
 
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.NavigationCue

@@ -1,9 +1,8 @@
-package com.lumina.domain.usecase
+package com.lumina.domain.usecase.camera
 
 import com.lumina.domain.service.CameraStateService
 import kotlinx.coroutines.delay
 import javax.inject.Inject
-
 
 /**
  * Use case for managing camera operations and frame capture.

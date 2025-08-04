@@ -1,4 +1,4 @@
-package com.lumina.domain.usecase
+package com.lumina.domain.usecase.scene
 
 import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.repository.LuminaRepository

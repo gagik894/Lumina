@@ -1,7 +1,6 @@
-package com.lumina.domain.usecase
+package com.lumina.domain.usecase.camera
 
 import javax.inject.Inject
-
 
 /**
  * Use case for managing frame processing throttling logic.
