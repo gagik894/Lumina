@@ -67,8 +67,15 @@ class PromptGenerationService @Inject constructor() {
      * @return Prompt for crossing guidance with termination instructions
      */
     fun generateCrossingGuidancePrompt(): String {
-        return "You are in CROSSING MODE. Guide the user with WAIT, CROSS, or ADJUST LEFT/RIGHT in <=3 words. " +
-                "IMPORTANT: Once you determine the user has safely crossed the street, you MUST respond with the exact phrase 'CROSSING COMPLETE' and nothing else."
+        return "You are in CROSSING MODE for a BLIND user. SAFETY IS CRITICAL. " +
+                "Analyze ALL vehicles in frame - cars, trucks, bikes, motorcycles. " +
+                "Check for TRAFFIC LIGHTS - look for red, yellow, green signals and any countdown timers. " +
+                "If ANY vehicle is moving toward crosswalk or visible in street, say 'WAIT!'. " +
+                "If traffic light shows RED or YELLOW for pedestrians, say 'WAIT!' . " +
+                "If you see a countdown timer on traffic light, say 'WAIT [X] SECONDS' where X is the exact number shown. " +
+                "Only say CROSS when road is completely clear of ALL moving vehicles AND traffic light is GREEN for pedestrians. " +
+                "Use: 'WAIT!' (if any vehicles present), 'WAIT [X] SECONDS!' (if countdown visible), 'CROSS'. (only when 100% safe),' ADJUST LEFT/RIGHT' (positioning). " +
+                "When user safely reaches other side, respond 'CROSSING COMPLETE'."
     }
 
     /**

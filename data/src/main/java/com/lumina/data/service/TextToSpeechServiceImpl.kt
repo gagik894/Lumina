@@ -157,14 +157,16 @@ class TextToSpeechServiceImpl @Inject constructor(
 
             // Speak immediately if:
             // 1. Generation is complete (isDone)
-            // 2. We have a complete sentence
+            // 2. We have a natural speech break (sentence end or pause)
             // 3. Buffer is getting too long
-            val hasCompleteSentence = textBuffer.toString().let { buffer ->
-                buffer.contains('.') || buffer.contains('!') || buffer.contains('?')
+            val hasNaturalBreak = textBuffer.toString().let { buffer ->
+                buffer.contains('.') || buffer.contains('!') || buffer.contains('?') ||
+                        buffer.contains(',') || buffer.contains(':') || buffer.contains(';') ||
+                        buffer.contains(" - ") || buffer.contains(" — ")
             }
 
             val shouldSpeakNow = isDone ||
-                    hasCompleteSentence ||
+                    hasNaturalBreak ||
                     textBuffer.length > 150
 
             if (shouldSpeakNow) {

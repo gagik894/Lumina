@@ -194,6 +194,92 @@ class AlertCoordinator @Inject constructor(
     }
 
     /**
+     * Enhanced crossing guidance with traffic light timing detection.
+     *
+     * This method provides advanced crossing guidance that can:
+     * - Detect traffic light countdown timers and pause processing accordingly
+     * - Automatically resume processing after countdown expires
+     *
+     * @param frames Current frames for AI analysis
+     * @param aiResponseGenerator Function that generates AI responses given a prompt and frames
+     * @param onCrossingComplete Callback invoked when crossing is determined to be complete
+     * @param onTimerDetected Callback invoked when a traffic light timer is detected (seconds remaining)
+     */
+    suspend fun coordinateEnhancedCrossingGuidance(
+        frames: List<TimestampedFrame>,
+        aiResponseGenerator: suspend (String, List<TimestampedFrame>) -> Flow<Pair<String, Boolean>>,
+        onCrossingComplete: () -> Unit,
+        onTimerDetected: suspend (Int) -> Unit = {}
+    ) {
+        Log.i(TAG, "Coordinating enhanced crossing guidance with traffic light detection")
+
+        val prompt = promptGenerator.generateCrossingGuidancePrompt()
+        val responseBuffer = StringBuilder()
+
+        try {
+            aiResponseGenerator(prompt, frames)
+                .collect { (chunk, done) ->
+                    // Accumulate chunks for complete response analysis
+                    responseBuffer.append(chunk)
+                    val fullResponse = responseBuffer.toString()
+
+                    when {
+                        fullResponse.contains("CROSSING COMPLETE", ignoreCase = true) -> {
+                            Log.i(TAG, "Crossing complete signal received from AI")
+                            navigationCueFlow.emit(
+                                NavigationCue.InformationalAlert("Crossing complete.", true)
+                            )
+                            onCrossingComplete()
+                        }
+
+                        done && fullResponse.contains("WAIT") && fullResponse.contains("SECONDS") -> {
+                            // Only check for timer when response is complete to avoid partial matches
+                            val timerMatch =
+                                Regex("WAIT\\s+(\\d+)\\s+SECONDS", RegexOption.IGNORE_CASE).find(
+                                    fullResponse
+                                )
+                            if (timerMatch != null) {
+                                val seconds = timerMatch.groupValues[1].toIntOrNull()
+                                if (seconds != null && seconds > 0) {
+                                    Log.i(TAG, "Traffic light timer detected: $seconds seconds")
+                                    navigationCueFlow.emit(
+                                        NavigationCue.CriticalAlert(
+                                            fullResponse.trim(),
+                                            done
+                                        )
+                                    )
+
+                                    // Notify about the timer detection
+                                    onTimerDetected(seconds)
+                                    return@collect
+                                }
+                            }
+                            // Fallback to regular WAIT if timer extraction failed
+                            navigationCueFlow.emit(
+                                NavigationCue.CriticalAlert(
+                                    fullResponse.trim(),
+                                    done
+                                )
+                            )
+                        }
+
+                        chunk.isNotBlank() -> {
+                            // Emit chunks as they come for real-time feedback, but don't parse timers yet
+                            Log.d(TAG, "Emitting chunk NavigationCue: '$chunk', isDone: $done")
+                            navigationCueFlow.emit(NavigationCue.CriticalAlert(chunk, done))
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during enhanced crossing guidance", e)
+            // Emit a safety-oriented fallback message
+            navigationCueFlow.emit(
+                NavigationCue.CriticalAlert("Continue with caution", true)
+            )
+        }
+    }
+
+    /**
      * Coordinates custom scene description or question answering alerts.
      *
      * This method handles user-initiated queries and scene descriptions,
