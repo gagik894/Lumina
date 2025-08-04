@@ -3,6 +3,7 @@ package com.lumina.data.repository
 import android.util.Log
 import com.lumina.data.datasource.TimestampedFrame
 import com.lumina.domain.model.NavigationCue
+import com.lumina.domain.service.HapticFeedbackService
 import com.lumina.domain.service.TwoPhasePromptManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -28,7 +29,8 @@ private const val TAG = "AlertCoordinator"
 @Singleton
 class AlertCoordinator @Inject constructor(
     private val promptGenerator: PromptGenerator,
-    private val twoPhasePromptManager: TwoPhasePromptManager
+    private val twoPhasePromptManager: TwoPhasePromptManager,
+    private val hapticFeedbackService: HapticFeedbackService
 ) {
 
     /** Shared flow for broadcasting navigation cues to subscribers */
@@ -65,6 +67,9 @@ class AlertCoordinator @Inject constructor(
                 .collect { (partialResponse, isDone) ->
                     val criticalAlert = NavigationCue.CriticalAlert(partialResponse, isDone)
                     navigationCueFlow.emit(criticalAlert)
+
+                    // Trigger haptic feedback for critical alerts
+                    hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.CRITICAL_WARNING)
 
                     if (isDone) {
                         Log.d(TAG, "Critical alert completed: $partialResponse")
@@ -236,6 +241,9 @@ class AlertCoordinator @Inject constructor(
                             navigationCueFlow.emit(
                                 NavigationCue.InformationalAlert("Crossing complete.", true)
                             )
+                            // Trigger success haptic feedback
+                            hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.SUCCESS)
+                            
                             // End the session when crossing is complete
                             twoPhasePromptManager.endSession(sessionId)
                             onCrossingComplete()

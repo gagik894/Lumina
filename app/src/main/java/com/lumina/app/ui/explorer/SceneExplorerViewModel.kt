@@ -10,6 +10,7 @@ import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.model.NavigationCueType
 import com.lumina.domain.model.VoiceCommand
 import com.lumina.domain.service.CameraStateService
+import com.lumina.domain.service.HapticFeedbackService
 import com.lumina.domain.service.TextToSpeechService
 import com.lumina.domain.usecase.camera.ManageCameraOperationsUseCase
 import com.lumina.domain.usecase.camera.ManageFrameThrottlingUseCase
@@ -87,7 +88,8 @@ class SceneExplorerViewModel @Inject constructor(
     private val readReceipt: ReadReceiptUseCase,
     private val readText: ReadTextUseCase,
     private val cameraStateService: CameraStateService,
-    private val textToSpeechService: TextToSpeechService
+    private val textToSpeechService: TextToSpeechService,
+    private val hapticFeedbackService: HapticFeedbackService
 ) : ViewModel() {
 
     companion object {
@@ -288,6 +290,14 @@ class SceneExplorerViewModel @Inject constructor(
                     deactivateCameraAndClearBuffer()
                     handleTts.speak("What is your question?", _ttsState.value)
                 }
+            }
+
+            is VoiceCommand.ToggleHaptic -> {
+                toggleHapticFeedback()
+            }
+
+            is VoiceCommand.TestHaptic -> {
+                testHapticFeedback()
             }
 
             is VoiceCommand.Unknown -> {
@@ -607,6 +617,25 @@ class SceneExplorerViewModel @Inject constructor(
 
     fun speak(text: String) = handleTts.speak(text, _ttsState.value)
     fun isSpeaking(): Boolean = handleTts.isSpeaking()
+
+    /**
+     * Haptic feedback controls
+     */
+    fun toggleHapticFeedback() {
+        val newState = !hapticFeedbackService.isHapticEnabled()
+        hapticFeedbackService.setHapticEnabled(newState)
+        val message = if (newState) "Haptic feedback enabled" else "Haptic feedback disabled"
+        speak(message)
+    }
+
+    fun testHapticFeedback() {
+        if (hapticFeedbackService.isHapticEnabled()) {
+            hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.NOTIFICATION)
+            speak("Haptic test")
+        } else {
+            speak("Haptic feedback is disabled")
+        }
+    }
 
     /**
      * Called when the ViewModel is no longer used and will be destroyed.

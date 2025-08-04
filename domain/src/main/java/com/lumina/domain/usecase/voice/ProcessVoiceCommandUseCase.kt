@@ -59,6 +59,14 @@ class ProcessVoiceCommandUseCase @Inject constructor() {
                 VoiceCommand.ReadText
             }
 
+            lower == "toggle haptic" || lower == "haptic on" || lower == "haptic off" -> {
+                VoiceCommand.ToggleHaptic
+            }
+
+            lower == "test haptic" || lower == "vibrate" -> {
+                VoiceCommand.TestHaptic
+            }
+
             lower.startsWith("question") -> {
                 val question = lower.removePrefix("question").trim()
                 if (question.isNotEmpty()) {
