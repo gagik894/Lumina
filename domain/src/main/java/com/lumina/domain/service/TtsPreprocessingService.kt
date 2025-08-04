@@ -26,7 +26,9 @@ class TtsPreprocessingService @Inject constructor() {
     fun preprocessForTts(text: String): String {
         var processed = text
 
-        // Apply preprocessing in order of importance
+        // Apply preprocessing in order of importance - structured text first
+        processed = preprocessUrls(processed)
+        processed = preprocessEmails(processed)
         processed = preprocessCurrency(processed)
         processed = preprocessDates(processed)
         processed = preprocessTimes(processed)
@@ -37,6 +39,63 @@ class TtsPreprocessingService @Inject constructor() {
         processed = cleanupSpacing(processed)
 
         return processed
+    }
+
+    /**
+     * Converts URLs to spoken form with proper pronunciation.
+     * Examples:
+     * - "www.google.com" → "w w w dot google dot com"
+     * - "https://example.com/path" → "h t t p s colon slash slash example dot com slash path"
+     * - "google.com" → "google dot com"
+     */
+    private fun preprocessUrls(text: String): String {
+        var result = text
+
+        // Full URLs with protocol
+        result = result.replace(
+            Regex(
+                "https?://([\\w.-]+(?:/[\\w.-]*)*)",
+                RegexOption.IGNORE_CASE
+            )
+        ) { match ->
+            val fullUrl = match.value
+            val protocol = if (fullUrl.startsWith("https")) "h t t p s" else "h t t p"
+            val domain = match.groupValues[1]
+            val processedDomain = domain.replace(".", " dot ").replace("/", " slash ")
+            "$protocol colon slash slash $processedDomain"
+        }
+
+        // Domain names (www.example.com or example.com)
+        result =
+            result.replace(Regex("\\b(?:www\\.)?([a-zA-Z0-9-]+(?:\\.[a-zA-Z]{2,})+)\\b")) { match ->
+                val domain = match.value
+                if (domain.startsWith("www.")) {
+                    val processed = domain.replace("www.", "w w w dot ").replace(".", " dot ")
+                    processed
+                } else {
+                    domain.replace(".", " dot ")
+                }
+            }
+
+        return result
+    }
+
+    /**
+     * Converts email addresses to spoken form with proper pauses.
+     * Examples:
+     * - "user@example.com" → "user, at, example dot com"
+     * - "name.lastname@company.org" → "name dot lastname, at, company dot org"
+     */
+    private fun preprocessEmails(text: String): String {
+        var result = text
+
+        result = result.replace(Regex("([\\w.-]+)@([\\w.-]+\\.[a-zA-Z]{2,})")) { match ->
+            val localPart = match.groupValues[1].replace(".", " dot ")
+            val domainPart = match.groupValues[2].replace(".", " dot ")
+            "$localPart, at, $domainPart"
+        }
+
+        return result
     }
 
     /**
@@ -237,6 +296,7 @@ class TtsPreprocessingService @Inject constructor() {
         val abbreviations = mapOf(
             "Dr\\." to "Doctor",
             "St\\." to "Street",
+            "Str\\." to "Street",
             "Ave\\." to "Avenue",
             "Blvd\\." to "Boulevard",
             "Inc\\." to "Incorporated",
@@ -251,7 +311,7 @@ class TtsPreprocessingService @Inject constructor() {
         )
 
         abbreviations.forEach { (abbrev, expansion) ->
-            result = result.replace(Regex("\\b$abbrev\\b"), expansion)
+            result = result.replace(Regex("\\b$abbrev\\b", RegexOption.IGNORE_CASE), expansion)
         }
 
         return result

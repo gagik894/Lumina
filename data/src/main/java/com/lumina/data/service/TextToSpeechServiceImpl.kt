@@ -158,7 +158,35 @@ class TextToSpeechServiceImpl @Inject constructor(
             // 3. Buffer is getting too long
             // 4. Critical alert (more urgent)
             val hasNaturalBreak = textBuffer.toString().let { buffer ->
-                buffer.contains('.') || buffer.contains('!') || buffer.contains('?') ||
+                // Quick check to avoid breaking structured content like URLs, emails, numbers
+                val endsWithStructuredContent =
+                    buffer.matches(Regex(".*[a-zA-Z0-9-]+\\.[a-zA-Z0-9-]*$")) ||
+                            buffer.matches(Regex(".*[0-9]+\\.[0-9]*$")) ||
+                            buffer.contains("www.") ||
+                            buffer.contains("http") ||
+                            buffer.contains("@")
+
+                // Only treat punctuation as sentence breaks if they're likely at sentence ends
+                // and not part of structured content
+                val sentenceEnders = listOf(".", "!", "?")
+                val hasSentenceEnd = if (endsWithStructuredContent) {
+                    // For structured content, only break on clear sentence endings with space/newline
+                    sentenceEnders.any { ender ->
+                        buffer.contains("$ender ") ||
+                                buffer.contains("$ender\n") ||
+                                buffer.contains("$ender\t")
+                    }
+                } else {
+                    // For regular text, also break on endings at buffer end
+                    sentenceEnders.any { ender ->
+                        buffer.endsWith(ender) ||
+                                buffer.contains("$ender ") ||
+                                buffer.contains("$ender\n") ||
+                                buffer.contains("$ender\t")
+                    }
+                }
+
+                hasSentenceEnd ||
                         buffer.contains(',') || buffer.contains(':') || buffer.contains(';') ||
                         buffer.contains(" - ") || buffer.contains(" — ")
             }
