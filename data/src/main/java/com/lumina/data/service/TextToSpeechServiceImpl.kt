@@ -7,6 +7,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.service.TextToSpeechService
+import com.lumina.domain.service.TtsPreprocessingService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import javax.inject.Inject
@@ -23,7 +24,8 @@ private const val TAG = "TextToSpeechServiceImpl"
  */
 @Singleton
 class TextToSpeechServiceImpl @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val ttsPreprocessingService: TtsPreprocessingService
 ) : TextToSpeechService {
 
     private var textToSpeech: TextToSpeech? = null
@@ -136,7 +138,9 @@ class TextToSpeechServiceImpl @Inject constructor(
 
         // Brief pause, then speak the complete message clearly
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            speakWithParameters(message, TextToSpeech.QUEUE_ADD, 1.0f, 0.9f)
+            // Preprocess the message for better TTS pronunciation
+            val processedMessage = ttsPreprocessingService.preprocessForTts(message)
+            speakWithParameters(processedMessage, TextToSpeech.QUEUE_ADD, 1.0f, 0.9f)
         }, 1000) // Slightly longer pause for clarity
     }
 
@@ -193,7 +197,9 @@ class TextToSpeechServiceImpl @Inject constructor(
                 textBuffer.clear()
 
                 if (textToSpeak.isNotBlank()) {
-                    speakImmediately(textToSpeak, TextToSpeech.QUEUE_ADD, navigationCue)
+                    // Preprocess the text for better TTS pronunciation
+                    val processedText = ttsPreprocessingService.preprocessForTts(textToSpeak)
+                    speakImmediately(processedText, TextToSpeech.QUEUE_ADD, navigationCue)
                 }
             }
         }
@@ -218,7 +224,9 @@ class TextToSpeechServiceImpl @Inject constructor(
             return
         }
 
-        speakWithParameters(text, TextToSpeech.QUEUE_ADD, 1.0f, 1.0f)
+        // Preprocess the text for better TTS pronunciation
+        val processedText = ttsPreprocessingService.preprocessForTts(text)
+        speakWithParameters(processedText, TextToSpeech.QUEUE_ADD, 1.0f, 1.0f)
     }
 
     private fun speakWithParameters(
