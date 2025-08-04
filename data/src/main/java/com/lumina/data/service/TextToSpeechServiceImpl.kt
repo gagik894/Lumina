@@ -114,16 +114,9 @@ class TextToSpeechServiceImpl @Inject constructor(
             is NavigationCue.AmbientUpdate -> navigationCue.isDone
         }
 
-        // Handle critical alerts specially with clear announcement
-        if (navigationCue is NavigationCue.CriticalAlert) {
-            if (isDone && message.isNotBlank()) {
-                // Only speak complete critical alert messages
-                speakCriticalAlert(message)
-            }
-        } else {
-            // For non-critical alerts, use smart buffering
-            addToBuffer(message, navigationCue, isDone)
-        }
+        // For crossing mode and other continuous operations, use smart buffering for all alert types
+        // This ensures TTS speaks chunks as they come in, providing real-time feedback
+        addToBuffer(message, navigationCue, isDone)
     }
 
     /**
@@ -163,26 +156,33 @@ class TextToSpeechServiceImpl @Inject constructor(
             // 1. Generation is complete (isDone)
             // 2. We have a natural speech break (sentence end or pause)
             // 3. Buffer is getting too long
+            // 4. Critical alert (more urgent)
             val hasNaturalBreak = textBuffer.toString().let { buffer ->
                 buffer.contains('.') || buffer.contains('!') || buffer.contains('?') ||
                         buffer.contains(',') || buffer.contains(':') || buffer.contains(';') ||
                         buffer.contains(" - ") || buffer.contains(" — ")
             }
 
+            val isCritical = navigationCue is NavigationCue.CriticalAlert
+            val criticalBufferThreshold =
+                if (isCritical) 50 else 150  // Speak sooner for critical alerts
+            val criticalDelayMs =
+                if (isCritical) 200L else bufferDelayMs  // Faster response for critical alerts
+
             val shouldSpeakNow = isDone ||
                     hasNaturalBreak ||
-                    textBuffer.length > 150
+                    textBuffer.length > criticalBufferThreshold
 
             if (shouldSpeakNow) {
                 speakBufferedText(navigationCue)
             } else {
-                // Schedule speaking after delay only if generation is still ongoing
+                // Schedule speaking after delay - shorter for critical alerts
                 pendingBufferRunnable = Runnable {
-                    if (System.currentTimeMillis() - lastBufferUpdateTime >= bufferDelayMs) {
+                    if (System.currentTimeMillis() - lastBufferUpdateTime >= criticalDelayMs) {
                         speakBufferedText(navigationCue)
                     }
                 }
-                bufferHandler?.postDelayed(pendingBufferRunnable!!, bufferDelayMs)
+                bufferHandler?.postDelayed(pendingBufferRunnable!!, criticalDelayMs)
             }
         }
     }
@@ -199,7 +199,15 @@ class TextToSpeechServiceImpl @Inject constructor(
                 if (textToSpeak.isNotBlank()) {
                     // Preprocess the text for better TTS pronunciation
                     val processedText = ttsPreprocessingService.preprocessForTts(textToSpeak)
-                    speakImmediately(processedText, TextToSpeech.QUEUE_ADD, navigationCue)
+
+                    // For critical alerts, interrupt current speech for immediate attention
+                    val queueMode = if (navigationCue is NavigationCue.CriticalAlert) {
+                        TextToSpeech.QUEUE_FLUSH  // Replace any current speech
+                    } else {
+                        TextToSpeech.QUEUE_ADD    // Queue normally
+                    }
+
+                    speakImmediately(processedText, queueMode, navigationCue)
                 }
             }
         }

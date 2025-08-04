@@ -36,21 +36,60 @@ class ProcessNavigationCueFlowUseCase @Inject constructor() {
                 "",
                 NavigationCueType.NONE
             )
-        ) { (accumulator, _), navigationCue ->
+        ) { (accumulator, previousType), navigationCue ->
             when (navigationCue) {
                 is NavigationCue.CriticalAlert -> {
-                    val text = if (navigationCue.isDone) "" else accumulator + navigationCue.message
-                    Pair(text, NavigationCueType.CRITICAL)
+                    if (navigationCue.isDone) {
+                        // When done, show the final complete message then clear for next
+                        if (navigationCue.message.isNotBlank()) {
+                            // Final message piece - add it and mark as complete
+                            val finalText = accumulator + navigationCue.message
+                            Pair(finalText, NavigationCueType.CRITICAL)
+                        } else {
+                            // Just a completion signal - clear the screen
+                            Pair("", NavigationCueType.NONE)
+                        }
+                    } else {
+                        // Still building the message
+                        val text = accumulator + navigationCue.message
+                        Pair(text, NavigationCueType.CRITICAL)
+                    }
                 }
 
                 is NavigationCue.InformationalAlert -> {
-                    val text = if (navigationCue.isDone) "" else accumulator + navigationCue.message
-                    Pair(text, NavigationCueType.INFORMATIONAL)
+                    if (navigationCue.isDone) {
+                        // When done, show the final complete message then clear for next
+                        if (navigationCue.message.isNotBlank()) {
+                            // Final message piece - add it and mark as complete
+                            val finalText = accumulator + navigationCue.message
+                            Pair(finalText, NavigationCueType.INFORMATIONAL)
+                        } else {
+                            // Just a completion signal - clear the screen
+                            Pair("", NavigationCueType.NONE)
+                        }
+                    } else {
+                        // Still building the message
+                        val text = accumulator + navigationCue.message
+                        Pair(text, NavigationCueType.INFORMATIONAL)
+                    }
                 }
 
                 is NavigationCue.AmbientUpdate -> {
-                    val text = if (navigationCue.isDone) "" else accumulator + navigationCue.message
-                    Pair(text, NavigationCueType.AMBIENT)
+                    if (navigationCue.isDone) {
+                        // When done, show the final complete message then clear for next
+                        if (navigationCue.message.isNotBlank()) {
+                            // Final message piece - add it and mark as complete
+                            val finalText = accumulator + navigationCue.message
+                            Pair(finalText, NavigationCueType.AMBIENT)
+                        } else {
+                            // Just a completion signal - clear the screen
+                            Pair("", NavigationCueType.NONE)
+                        }
+                    } else {
+                        // Still building the message
+                        val text = accumulator + navigationCue.message
+                        Pair(text, NavigationCueType.AMBIENT)
+                    }
                 }
             }
         }

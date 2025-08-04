@@ -2,17 +2,17 @@ package com.lumina.data.repository
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Log
 import com.lumina.data.datasource.TimestampedFrame
 import com.lumina.data.util.FrameSelector
 import com.lumina.domain.model.ImageInput
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "FrameBufferManager"
 
 /**
  * Manages a circular buffer of timestamped camera frames optimized for motion analysis.
@@ -29,25 +29,24 @@ import javax.inject.Singleton
 @Singleton
 class FrameBufferManager @Inject constructor() {
 
-    private val managerScope = CoroutineScope(Dispatchers.Default)
     private val _frameFlow = MutableSharedFlow<Pair<Bitmap, Long>>(
         replay = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    init {
-        managerScope.launch {
-            _frameFlow.collect { (bitmap, timestamp) ->
-                addFrame(bitmap, timestamp)
-            }
-        }
-    }
-
     fun getFrameFlow(): Flow<Pair<Bitmap, Long>> = _frameFlow
 
-    suspend fun processNewFrame(image: ImageInput) {
+    fun processNewFrame(image: ImageInput) {
         val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
         val timestamp = System.currentTimeMillis()
+
+        // Add frame to buffer immediately - no delay through flow collection
+        addFrame(bitmap, timestamp)
+
+        // Log frame freshness for debugging
+        Log.d(TAG, "New frame added immediately at $timestamp")
+
+        // Then emit to flow for any listeners
         _frameFlow.tryEmit(Pair(bitmap, timestamp))
     }
 
@@ -90,7 +89,43 @@ class FrameBufferManager @Inject constructor() {
      */
     @Synchronized
     fun getLatestFrame(): TimestampedFrame? {
-        return frameBuffer.lastOrNull()
+        val latestFrame = frameBuffer.lastOrNull()
+
+        // Log latest frame age for debugging
+        if (latestFrame != null) {
+            val frameAge = System.currentTimeMillis() - latestFrame.timestampMs
+            Log.d(TAG, "Latest frame age: ${frameAge}ms")
+
+            if (frameAge > 500) { // Warn if latest frame is older than 500ms
+                Log.w(TAG, "WARNING: Latest frame is ${frameAge}ms old - buffer may be stale")
+            }
+        }
+
+        return latestFrame
+    }
+
+    /**
+     * Gets buffer status information for debugging frame freshness issues.
+     *
+     * @return String with buffer status details
+     */
+    @Synchronized
+    fun getBufferStatus(): String {
+        val currentTime = System.currentTimeMillis()
+        val bufferSize = frameBuffer.size
+
+        if (frameBuffer.isEmpty()) {
+            return "Buffer: EMPTY"
+        }
+
+        val oldestFrame = frameBuffer.first()
+        val latestFrame = frameBuffer.last()
+
+        val oldestAge = currentTime - oldestFrame.timestampMs
+        val latestAge = currentTime - latestFrame.timestampMs
+        val bufferSpan = latestFrame.timestampMs - oldestFrame.timestampMs
+
+        return "Buffer: $bufferSize frames, span: ${bufferSpan}ms, latest: ${latestAge}ms old, oldest: ${oldestAge}ms old"
     }
 
     /**
@@ -104,7 +139,19 @@ class FrameBufferManager @Inject constructor() {
      */
     @Synchronized
     fun getBestQualityFrame(): TimestampedFrame? {
-        return FrameSelector.selectBestQualityFrame(frameBuffer.toList())
+        val bestFrame = FrameSelector.selectBestQualityFrame(frameBuffer.toList())
+
+        // Log frame age for debugging old frame issues
+        if (bestFrame != null) {
+            val frameAge = System.currentTimeMillis() - bestFrame.timestampMs
+            Log.d(TAG, "Selected best quality frame age: ${frameAge}ms")
+
+            if (frameAge > 1000) { // Warn if frame is older than 1 second
+                Log.w(TAG, "WARNING: Selected frame is ${frameAge}ms old - may be stale")
+            }
+        }
+
+        return bestFrame
     }
 
     /**
@@ -119,7 +166,19 @@ class FrameBufferManager @Inject constructor() {
      */
     @Synchronized
     fun getMotionAnalysisFrames(): List<TimestampedFrame> {
-        return FrameSelector.selectMotionFrames(frameBuffer.toList())
+        val motionFrames = FrameSelector.selectMotionFrames(frameBuffer.toList())
+
+        // Log motion frame ages for debugging
+        motionFrames.forEachIndexed { index, frame ->
+            val frameAge = System.currentTimeMillis() - frame.timestampMs
+            Log.d(TAG, "Motion frame $index age: ${frameAge}ms")
+
+            if (frameAge > 1000) {
+                Log.w(TAG, "WARNING: Motion frame $index is ${frameAge}ms old - may be stale")
+            }
+        }
+
+        return motionFrames
     }
 
     /**

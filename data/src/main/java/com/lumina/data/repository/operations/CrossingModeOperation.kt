@@ -13,13 +13,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-private const val TAG = "CrossingModeOperation"
 
 class CrossingModeOperation @Inject constructor(
     private val transientOperationCoordinator: TransientOperationCoordinator,
@@ -31,6 +30,16 @@ class CrossingModeOperation @Inject constructor(
 ) {
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
     private var currentCrossingJob: Job? = null
+
+    // Throttling mechanism for crossing mode
+    @Volatile
+    private var lastAiRequestTime = 0L
+    private val aiRequestCooldownMs = 5000L // 5 seconds between requests
+
+    companion object {
+        private const val TAG = "CrossingModeOperation"
+        private const val AI_REQUEST_COOLDOWN_SECONDS = 5
+    }
 
     fun execute(): Flow<NavigationCue> {
         return callbackFlow {
@@ -51,6 +60,22 @@ class CrossingModeOperation @Inject constructor(
                         sessionId,
                         PromptGenerationService.OperationMode.CROSSING_GUIDANCE
                     )
+
+                    // Reset throttling for immediate first frame processing
+                    lastAiRequestTime = 0L
+
+                    // Add a safety timeout to prevent crossing mode from running indefinitely
+                    val timeoutJob = repositoryScope.launch {
+                        delay(300_000) // 5 minutes timeout
+                        Log.w(TAG, "Crossing mode timeout reached - automatically ending session")
+                        trySend(
+                            NavigationCue.InformationalAlert(
+                                "Crossing mode ended due to timeout. Please restart if needed.",
+                                true
+                            )
+                        )
+                        this@callbackFlow.close()
+                    }
 
                     // Listen for timer events
                     val timerEventJob = repositoryScope.launch {
@@ -101,14 +126,38 @@ class CrossingModeOperation @Inject constructor(
                                 return@collect
                             }
 
-                            val frames = frameBufferManager.getMotionAnalysisFrames()
-                            if (frames.isEmpty()) return@collect
+                            // Throttle AI requests - wait for cooldown period after last request
+                            val currentTime = System.currentTimeMillis()
+                            val timeSinceLastRequest = currentTime - lastAiRequestTime
+                            if (timeSinceLastRequest < aiRequestCooldownMs) {
+                                val remainingCooldown = aiRequestCooldownMs - timeSinceLastRequest
+                                Log.d(
+                                    TAG,
+                                    "Throttling AI request - ${remainingCooldown}ms remaining in cooldown"
+                                )
+                                return@collect
+                            }
+
+                            // Use best quality single frame instead of motion analysis frames
+                            val bestFrame = frameBufferManager.getBestQualityFrame()
+                            if (bestFrame == null) {
+                                Log.d(TAG, "No quality frame available")
+                                Log.d(TAG, "Buffer status: ${frameBufferManager.getBufferStatus()}")
+                                return@collect
+                            }
 
                             try {
+                                lastAiRequestTime = currentTime
+                                Log.i(
+                                    TAG,
+                                    "Sending single best quality frame to AI (${AI_REQUEST_COOLDOWN_SECONDS}s throttled)"
+                                )
+                                Log.d(TAG, "Buffer status: ${frameBufferManager.getBufferStatus()}")
+                                
                                 aiOperationHelper.withAiOperation {
                                     alertCoordinator.coordinateEnhancedCrossingGuidance(
                                         sessionId = sessionId,
-                                        frames = frames,
+                                        frames = listOf(bestFrame), // Single frame
                                         aiResponseGenerator = aiOperationHelper::generateResponse,
                                         onCrossingComplete = {
                                             // Crossing complete callback
@@ -133,6 +182,7 @@ class CrossingModeOperation @Inject constructor(
                         currentCrossingJob?.cancel()
                         timerEventJob.cancel()
                         alertCueCollectorJob.cancel()
+                        timeoutJob.cancel()
                         trafficLightTimerService.stopTimer()
                         // End the two-phase prompting session
                         repositoryScope.launch {

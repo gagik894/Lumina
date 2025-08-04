@@ -230,12 +230,30 @@ class AlertCoordinator @Inject constructor(
                     val fullResponse = responseBuffer.toString()
 
                     when {
-                        fullResponse.contains("CROSSING COMPLETE", ignoreCase = true) -> {
-                            Log.i(TAG, "Crossing complete signal received from AI")
+                        // Check for crossing completion with multiple possible phrases
+                        isCompletionDetected(fullResponse) -> {
+                            Log.i(TAG, "Crossing complete signal received from AI: '$fullResponse'")
                             navigationCueFlow.emit(
                                 NavigationCue.InformationalAlert("Crossing complete.", true)
                             )
                             // End the session when crossing is complete
+                            twoPhasePromptManager.endSession(sessionId)
+                            onCrossingComplete()
+                        }
+
+                        // Also check if AI indicates user is in a safe position (alternative completion detection)
+                        done && isSafePositionDetected(fullResponse) -> {
+                            Log.i(
+                                TAG,
+                                "Safe position detected, assuming crossing complete: '$fullResponse'"
+                            )
+                            navigationCueFlow.emit(
+                                NavigationCue.InformationalAlert(
+                                    "$fullResponse Safe position reached.",
+                                    true
+                                )
+                            )
+                            // End the session when in safe position
                             twoPhasePromptManager.endSession(sessionId)
                             onCrossingComplete()
                         }
@@ -414,6 +432,62 @@ class AlertCoordinator @Inject constructor(
             navigationCueFlow.emit(
                 NavigationCue.InformationalAlert("Object search temporarily unavailable", true)
             )
+        }
+    }
+
+    /**
+     * Detects if the AI response indicates crossing completion.
+     * Checks for multiple possible completion phrases that Gemma might use.
+     */
+    private fun isCompletionDetected(response: String): Boolean {
+        val completionPhrases = listOf(
+            "CROSSING COMPLETE",
+            "CROSSED SUCCESSFULLY",
+            "REACHED OTHER SIDE",
+            "REACHED THE OTHER SIDE",
+            "MADE IT ACROSS",
+            "CROSSING FINISHED",
+            "CROSSED SAFELY",
+            "ON THE OTHER SIDE",
+            "ARRIVED SAFELY",
+            "CROSSING DONE",
+            "YOU'VE CROSSED",
+            "YOU HAVE CROSSED",
+            "SAFE ON OTHER SIDE",
+            "REACHED DESTINATION",
+            "CROSSING SUCCESS",
+            "SAFELY ACROSS",
+            "NOW ON SIDEWALK",
+            "REACHED CURB",
+            "ON OPPOSITE SIDE",
+            "CROSSING SUCCESSFUL"
+        )
+
+        return completionPhrases.any { phrase ->
+            response.contains(phrase, ignoreCase = true)
+        }
+    }
+
+    /**
+     * Detects if the AI response indicates the user is in a safe position
+     * that suggests crossing completion (even if not explicitly stated).
+     */
+    private fun isSafePositionDetected(response: String): Boolean {
+        val safePositionPhrases = listOf(
+            "ON SIDEWALK",
+            "ON THE SIDEWALK",
+            "SAFE ON SIDEWALK",
+            "CLEAR OF ROAD",
+            "OFF THE STREET",
+            "NO LONGER IN STREET",
+            "AWAY FROM TRAFFIC",
+            "ON CURB",
+            "NEAR BUILDING",
+            "ON WALKWAY"
+        )
+
+        return safePositionPhrases.any { phrase ->
+            response.contains(phrase, ignoreCase = true)
         }
     }
 }
