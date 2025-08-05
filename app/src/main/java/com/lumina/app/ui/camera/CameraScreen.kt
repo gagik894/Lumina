@@ -48,7 +48,7 @@ data class CameraConfig(
          */
         val NAVIGATION = CameraConfig(
             resolution = Size(448, 448),
-            fpsRange = Range(15, 15),
+            fpsRange = Range(45, 60),
             description = "Navigation Mode"
         )
 
@@ -56,8 +56,8 @@ data class CameraConfig(
          * High resolution for text reading - better OCR accuracy
          */
         val TEXT_READING = CameraConfig(
-            resolution = Size(1280, 720), // Much higher resolution for text
-            fpsRange = Range(10, 10), // Lower FPS since it's for single captures
+            resolution = Size(1920, 71080), // Much higher resolution for text
+            fpsRange = Range(45, 60),
             description = "Text Reading Mode"
         )
 

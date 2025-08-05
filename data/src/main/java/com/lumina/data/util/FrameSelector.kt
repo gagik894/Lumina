@@ -17,6 +17,55 @@ object FrameSelector {
     private const val SHARPNESS_THRESHOLD = 12.0
 
     /**
+     * Computes a sharpness score based on average gradient magnitude.
+     */
+    private fun computeSharpnessScore(bmp: Bitmap): Double {
+        val step = 8
+        val w = bmp.width
+        val h = bmp.height
+        if (w < step * 2 || h < step * 2) return SHARPNESS_THRESHOLD
+        var sum = 0.0
+        var count = 0
+        for (y in step until h - step step step) {
+            for (x in step until w - step step step) {
+                val c = luminance(bmp.getPixel(x, y))
+                val diff = abs(c - luminance(bmp.getPixel(x + step, y))) +
+                        abs(c - luminance(bmp.getPixel(x, y + step)))
+                sum += diff
+                count++
+            }
+        }
+        return if (count > 0) sum / count else 0.0
+    }
+
+    /**
+     * Finds the frame with the highest sharpness score within SEARCH_RADIUS of index.
+     */
+    private fun findSharpestNear(buffer: List<TimestampedFrame>, index: Int): TimestampedFrame {
+        var bestFrame = buffer[index]
+        var bestScore = computeSharpnessScore(bestFrame.bitmap)
+        for (offset in 1..SEARCH_RADIUS) {
+            val left = index - offset
+            val right = index + offset
+            if (left >= 0) {
+                val score = computeSharpnessScore(buffer[left].bitmap)
+                if (score > bestScore) {
+                    bestScore = score
+                    bestFrame = buffer[left]
+                }
+            }
+            if (right <= buffer.lastIndex) {
+                val score = computeSharpnessScore(buffer[right].bitmap)
+                if (score > bestScore) {
+                    bestScore = score
+                    bestFrame = buffer[right]
+                }
+            }
+        }
+        return bestFrame
+    }
+
+    /**
      * Returns up to two frames providing motion context and acceptable sharpness.
      * Fallbacks to whatever is available if sharp alternatives cannot be found.
      */
@@ -36,9 +85,9 @@ object FrameSelector {
             }
         }
 
-        val sharpLatest = findSharpNear(buffer, latestIdx)
+        val sharpLatest = findSharpestNear(buffer, latestIdx)
         val sharpOlder =
-            if (candidateIdx != latestIdx) findSharpNear(buffer, candidateIdx) else null
+            if (candidateIdx != latestIdx) findSharpestNear(buffer, candidateIdx) else null
 
         return listOfNotNull(sharpOlder, sharpLatest).distinct()
     }
@@ -59,7 +108,7 @@ object FrameSelector {
         val latestIdx = buffer.lastIndex
 
         // Try to find a sharp frame near the latest, prioritizing recent frames
-        return findSharpNear(buffer, latestIdx)
+        return findSharpestNear(buffer, latestIdx)
     }
 
     private fun findSharpNear(buffer: List<TimestampedFrame>, index: Int): TimestampedFrame {

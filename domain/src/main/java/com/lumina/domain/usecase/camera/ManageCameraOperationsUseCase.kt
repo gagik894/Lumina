@@ -82,8 +82,8 @@ class ManageCameraOperationsUseCase @Inject constructor(
      * @return List of captured frames
      */
     suspend fun captureMultipleFrames(
-        frameCount: Int = 3,
-        intervalMs: Long = 200,
+        frameCount: Int = 5,
+        intervalMs: Long = 100,
         frameProvider: () -> ByteArray?
     ): List<ByteArray> {
         val frames = mutableListOf<ByteArray>()
