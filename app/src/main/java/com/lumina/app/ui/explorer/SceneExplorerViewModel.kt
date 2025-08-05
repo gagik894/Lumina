@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -132,7 +133,7 @@ class SceneExplorerViewModel @Inject constructor(
         combine(
             getInitializationState(),
             navigationOrchestrator.createNavigationFlow(
-                automaticCueFlow = startNavigation.invoke(), // Use the use case's Flow directly
+                automaticCueFlow = flowOf(), // Empty flow - navigation starts only on explicit command
                 isTtsEnabled = _ttsState
             ),
             _ttsState

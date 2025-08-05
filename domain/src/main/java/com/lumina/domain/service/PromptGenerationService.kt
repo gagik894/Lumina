@@ -163,11 +163,9 @@ class PromptGenerationService @Inject constructor() {
      * @return Prompt for spatial object description
      */
     fun generateObjectLocationPrompt(target: String): String {
-        return "Describe the location of the >target relative to the user. " +
+        return "Describe the location of the $target relative to the user. " +
                 "If it's a place like a store/pharmacy/building: provide clear directions on how to get there, including distance, direction, and any navigation cues. " +
                 "If it's a small object (like a remote, phone, keys): describe its precise location in detail that helps a blind user find it by touch, e.g., '3 feet ahead on the coffee table next to the couch', 'on the kitchen counter near the sink'. " +
-                "If the object is not visible, say 'I cannot see the target'. " +
-                "If the object is too far away to describe accurately, say 'The $target is too far away to describe'. " +
                 "Keep directions concise but complete enough for a visually impaired user to navigate or locate the item."
     }
 

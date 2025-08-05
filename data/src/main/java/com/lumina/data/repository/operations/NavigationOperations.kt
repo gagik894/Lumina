@@ -85,7 +85,14 @@ class NavigationOperations @Inject constructor(
                             }
 
                             ThreatAssessmentManager.AssessmentResult.NoAlert -> {
-                                // Continue monitoring without generating alerts
+                                // Provide continuous navigation guidance when no threats detected
+                                if (motionFrames.isNotEmpty()) {
+                                    alertCoordinator.coordinateNavigationGuidance(
+                                        "navigation_${System.currentTimeMillis()}",
+                                        motionFrames,
+                                        aiOperationHelper::generateResponse
+                                    )
+                                }
                             }
                         }
                     }

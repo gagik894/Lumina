@@ -373,26 +373,13 @@ class AlertCoordinator @Inject constructor(
         try {
             aiResponseGenerator(prompt, frames)
                 .collect { (chunk, done) ->
-                    if (chunk.isNotBlank()) {
-                        // Emit navigation guidance as ambient updates
-                        navigationCueFlow.emit(
-                            NavigationCue.AmbientUpdate(chunk.trim(), done)
-                        )
-                    } else if (done) {
-                        // Send empty completion signal to ensure flow completes
-                        navigationCueFlow.emit(
-                            NavigationCue.AmbientUpdate("", true)
-                        )
-                    }
+                    // Emit navigation guidance as ambient updates
+                    navigationCueFlow.emit(
+                        NavigationCue.AmbientUpdate(chunk.trim(), done)
+                    )
                 }
         } catch (e: Exception) {
             Log.e(TAG, "Error during navigation guidance: ${e.message}")
-            navigationCueFlow.emit(
-                NavigationCue.InformationalAlert(
-                    "Navigation guidance temporarily unavailable",
-                    true
-                )
-            )
         }
     }
 
