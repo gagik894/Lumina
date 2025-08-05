@@ -1,7 +1,6 @@
-package com.lumina.domain.usecase
+package com.lumina.domain.usecase.scene
 
-import com.lumina.domain.model.ImageInput
-import com.lumina.domain.model.SceneDescription
+import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.repository.LuminaRepository
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -20,12 +19,9 @@ class DescribeSceneUseCase @Inject constructor(
      * Invokes the use case to describe a scene based on the provided image input.
      * It uses a predefined prompt to guide the description generation.
      *
-     * @param image The image input to be processed.
-     * @return A flow of SceneDescription containing partial responses and completion status.
+     * @return A flow of NavigationCue containing the scene description
      */
-    operator fun invoke(image: ImageInput): Flow<SceneDescription> {
-        val prompt =
-            "Describe this scene for a person who is blind. Focus on key objects, layout, and potential obstacles. Be clear and concise."
-        return repository.describeScene(image, prompt)
+    operator fun invoke(): Flow<NavigationCue> {
+        return repository.describeScene()
     }
 }
