@@ -19,71 +19,78 @@ class ProcessVoiceCommandUseCase @Inject constructor() {
      * Processes a raw voice command string and returns a structured command.
      */
     fun processCommand(command: String): VoiceCommand {
-        val lower = command.trim().lowercase()
+        // Normalize input: lowercase and strip polite prefixes
+        val lowerOrig = command.trim().lowercase()
+        val lower = lowerOrig
+            .replace(Regex("\\b(please|can you|could you|would you|kindly)\\b"), "")
+            .trim()
 
-        return when {
-            lower.startsWith("find ") -> {
-                val target = lower.removePrefix("find ").trim()
-                if (target.isNotEmpty()) {
-                    VoiceCommand.FindObject(target)
-                } else {
-                    VoiceCommand.Unknown(command)
-                }
-            }
+        // Helper to remove articles
+        fun stripArticles(text: String) = text.replace(Regex("\\b(a|an|the)\\b"), "").trim()
 
-            lower == "cancel" || lower == "stop" -> {
-                VoiceCommand.Stop
-            }
-
-            lower == "start navigation" || lower == "start camera" -> {
-                VoiceCommand.StartNavigation
-            }
-
-            lower == "stop navigation" || lower == "stop camera" -> {
-                VoiceCommand.StopNavigation
-            }
-
-            lower == "cross street" -> {
-                VoiceCommand.CrossStreet
-            }
-
-            lower == "read money" || lower == "identify currency" -> {
-                VoiceCommand.IdentifyCurrency
-            }
-
-            lower == "read receipt" -> {
-                VoiceCommand.ReadReceipt
-            }
-
-            lower == "read text" -> {
-                VoiceCommand.ReadText
-            }
-
-            lower == "toggle haptic" || lower == "haptic on" || lower == "haptic off" -> {
-                VoiceCommand.ToggleHaptic
-            }
-
-            lower == "test haptic" || lower == "vibrate" -> {
-                VoiceCommand.TestHaptic
-            }
-
-            lower == "help" || lower == "help me" -> {
-                VoiceCommand.Help
-            }
-
-            lower.startsWith("question") -> {
-                val question = lower.removePrefix("question").trim()
-                if (question.isNotEmpty()) {
-                    VoiceCommand.AskQuestion(question)
-                } else {
-                    VoiceCommand.AskQuestion("")
-                }
-            }
-
-            else -> {
-                // Treat everything else as a question
-                VoiceCommand.AskQuestion(lower.trim())
-            }
+        // FIND OBJECT commands
+        val findKeys = listOf("find ", "locate ", "search for ", "look for ")
+        findKeys.firstOrNull { lower.startsWith(it) }?.let { key ->
+            val target = stripArticles(lower.removePrefix(key))
+            return if (target.isNotEmpty()) VoiceCommand.FindObject(target)
+            else VoiceCommand.Unknown(command)
         }
+
+        // STOP command
+        if (listOf("cancel", "stop").any { lower.startsWith(it) }) {
+            return VoiceCommand.Stop
+        }
+
+        // NAVIGATION commands
+        if (listOf("start navigation", "start camera", "navigate").any { lower.contains(it) }) {
+            return VoiceCommand.StartNavigation
+        }
+        if (listOf("stop navigation", "stop camera").any { lower.contains(it) }) {
+            return VoiceCommand.StopNavigation
+        }
+
+        // CROSS-STREET
+        if (lower.contains("cross street") || lower.contains("crossing street")) {
+            return VoiceCommand.CrossStreet
+        }
+
+        // OCR/text commands
+        if (listOf("identify currency", "read money").any { lower.contains(it) }) {
+            return VoiceCommand.IdentifyCurrency
+        }
+        if (listOf("read receipt", "read receipts").any { lower.contains(it) }) {
+            return VoiceCommand.ReadReceipt
+        }
+        if (listOf(
+                "read text",
+                "read book",
+                "read document",
+                "read label"
+            ).any { lower.contains(it) }
+        ) {
+            return VoiceCommand.ReadText
+        }
+
+        // HAPTIC
+        if (listOf("toggle haptic", "haptic on", "haptic off").any { lower.contains(it) }) {
+            return VoiceCommand.ToggleHaptic
+        }
+        if (listOf("test haptic", "vibrate").any { lower.contains(it) }) {
+            return VoiceCommand.TestHaptic
+        }
+
+        // HELP
+        if (lower.contains("help")) {
+            return VoiceCommand.Help
+        }
+
+        // QUESTION
+        if (lower.startsWith("question")) {
+            val q = lower.removePrefix("question").trim()
+            return VoiceCommand.AskQuestion(q)
+        }
+
+        // Default: treat as question
+        return VoiceCommand.AskQuestion(lower.trim())
     }
 }
