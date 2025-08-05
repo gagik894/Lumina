@@ -71,7 +71,12 @@ fun SceneExplorerScreen(
                     .fillMaxSize()
                     .background(Color.Black) // Always black background
                     .combinedClickable(
-                        onLongClick = { viewModel.stopAllOperationsAndGeneration() },
+                        onLongClick = {
+                            viewModel.stopAllOperationsAndGeneration(); startVoiceCommand(
+                            context,
+                            viewModel
+                        )
+                        },
                         onDoubleClick = { viewModel.investigateScene() },
                         onClick = {}
                     )
