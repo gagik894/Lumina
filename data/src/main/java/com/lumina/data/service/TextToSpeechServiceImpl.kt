@@ -137,12 +137,11 @@ class TextToSpeechServiceImpl @Inject constructor(
             if (textBuffer.isNotEmpty()) {
                 val textToSpeak = textBuffer.toString()
                 textBuffer.clear()
-                if (textToSpeak.isNotBlank()) {
-                    Log.d(TAG, "Speaking buffered text: '$textToSpeak'")
-                    val queueMode =
-                        if (navigationCue is NavigationCue.CriticalAlert) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                    speakWithParameters(textToSpeak, queueMode, 1.0f, 1.0f)
-                }
+                Log.d(TAG, "Speaking buffered text: '$textToSpeak'")
+                val queueMode =
+                    if (navigationCue is NavigationCue.CriticalAlert) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                speakWithParameters(textToSpeak, queueMode, 1.0f, 1.0f)
+
             }
         }
     }

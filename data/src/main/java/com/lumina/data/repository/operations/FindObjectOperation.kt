@@ -66,7 +66,7 @@ class FindObjectOperation @Inject constructor(
                 objectDetectorDataSource.getDetectionStream(frameBufferManager.getFrameFlow())
                     .collect { detections ->
                         if (detections.any { it.equals(normalizedTarget, ignoreCase = true) }) {
-                            trySend(NavigationCue.InformationalAlert("$target detected", false))
+                            trySend(NavigationCue.InformationalAlert("$target detected", true))
 
                             val bestFrame =
                                 frameBufferManager.getBestQualityFrame() ?: return@collect
@@ -81,14 +81,13 @@ class FindObjectOperation @Inject constructor(
                                         bestFrame.bitmap
                                     )
                                         .collect { (text, done) ->
-                                            if (text.isNotBlank()) {
-                                                trySend(
-                                                    NavigationCue.InformationalAlert(
-                                                        text,
-                                                        done
-                                                    )
+                                            trySend(
+                                                NavigationCue.InformationalAlert(
+                                                    text,
+                                                    done
                                                 )
-                                            }
+                                            )
+
                                             if (done) this@callbackFlow.close()
                                         }
                                 }
@@ -132,7 +131,7 @@ class FindObjectOperation @Inject constructor(
                     }
 
                     if (objectDetected) {
-                        trySend(NavigationCue.InformationalAlert("$target detected", false))
+                        trySend(NavigationCue.InformationalAlert("$target detected", true))
                         Log.d(TAG, "Object detected! Starting location description...")
 
                         aiOperationHelper.withAiOperation {
@@ -142,14 +141,13 @@ class FindObjectOperation @Inject constructor(
                                         TAG,
                                         "Location chunk: '$locationChunk', done: $locationDone"
                                     )
-                                    if (locationChunk.isNotBlank()) {
-                                        trySend(
-                                            NavigationCue.InformationalAlert(
-                                                locationChunk,
-                                                locationDone
-                                            )
+                                    trySend(
+                                        NavigationCue.InformationalAlert(
+                                            locationChunk,
+                                            locationDone
                                         )
-                                    }
+                                    )
+
                                     if (locationDone) {
                                         Log.d(TAG, "Location description complete, closing flow")
                                         this@callbackFlow.close()

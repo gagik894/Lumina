@@ -272,11 +272,12 @@ class GemmaAiDataSource @Inject constructor(
     override fun resetSession() {
         if (generationMutex.tryLock()) {
             try {
-                // If we haven't used many tokens yet, just reset the counter
-                // This avoids unnecessary session recreation for quick resets
-                if (approximateTokenCount < 1000) { // fresh session
-                    approximateTokenCount = estimateTokens(getSystemPrompt())
-                    Log.d(TAG, "Session context reset (lightweight) - keeping fresh session")
+                // If we haven't used many tokens yet, do nothing - session is already fresh
+                if (approximateTokenCount < 500) {
+                    Log.d(
+                        TAG,
+                        "Session is already fresh (${approximateTokenCount} tokens) - no reset needed"
+                    )
                     return
                 }
 

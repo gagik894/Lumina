@@ -76,30 +76,40 @@ class NavigationOrchestrator @Inject constructor(
         ) { (accumulator, _), navigationCue ->
             when (navigationCue) {
                 is NavigationCue.CriticalAlert -> {
-                    val text = if (navigationCue.isDone) {
-                        accumulator + navigationCue.message
+                    if (navigationCue.isDone) {
+                        // When done, show the final complete message 
+                        val finalText = accumulator + navigationCue.message
+                        Pair(finalText, NavigationCueType.CRITICAL)
+
                     } else {
-                        accumulator + navigationCue.message
+                        // Still building the message
+                        val text = accumulator + navigationCue.message
+                        Pair(text, NavigationCueType.CRITICAL)
                     }
-                    Pair(text, NavigationCueType.CRITICAL)
                 }
 
                 is NavigationCue.InformationalAlert -> {
-                    val text = if (navigationCue.isDone) {
-                        accumulator + navigationCue.message
+                    if (navigationCue.isDone) {
+                        // When done, show the final complete message
+                        val finalText = accumulator + navigationCue.message
+                        Pair(finalText, NavigationCueType.INFORMATIONAL)
+
                     } else {
-                        accumulator + navigationCue.message
+                        // Still building the message
+                        val text = accumulator + navigationCue.message
+                        Pair(text, NavigationCueType.INFORMATIONAL)
                     }
-                    Pair(text, NavigationCueType.INFORMATIONAL)
                 }
 
                 is NavigationCue.AmbientUpdate -> {
-                    val text = if (navigationCue.isDone) {
-                        accumulator + navigationCue.message
+                    if (navigationCue.isDone) {
+                        val finalText = accumulator + navigationCue.message
+                        Pair(finalText, NavigationCueType.AMBIENT)
                     } else {
-                        accumulator + navigationCue.message
+                        // Still building the message
+                        val text = accumulator + navigationCue.message
+                        Pair(text, NavigationCueType.AMBIENT)
                     }
-                    Pair(text, NavigationCueType.AMBIENT)
                 }
             }
         }

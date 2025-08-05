@@ -107,8 +107,28 @@ object FrameSelector {
 
         val latestIdx = buffer.lastIndex
 
-        // Try to find a sharp frame near the latest, prioritizing recent frames
-        return findSharpestNear(buffer, latestIdx)
+        // First, try to find a sharp frame near the latest, prioritizing recent frames
+        val nearestSharp = findSharpestNear(buffer, latestIdx)
+
+        // Check if the selected frame passes our sharpness threshold
+        if (computeSharpnessScore(nearestSharp.bitmap) >= SHARPNESS_THRESHOLD) {
+            return nearestSharp
+        }
+
+        // If no good frame found near latest, search entire buffer for best quality
+        var bestFrame = buffer.last() // fallback to latest
+        var bestScore = computeSharpnessScore(bestFrame.bitmap)
+
+        // Search entire buffer for the sharpest frame
+        for (frame in buffer) {
+            val score = computeSharpnessScore(frame.bitmap)
+            if (score > bestScore) {
+                bestScore = score
+                bestFrame = frame
+            }
+        }
+
+        return bestFrame
     }
 
     private fun findSharpNear(buffer: List<TimestampedFrame>, index: Int): TimestampedFrame {

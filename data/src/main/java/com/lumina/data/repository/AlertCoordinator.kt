@@ -187,7 +187,7 @@ class AlertCoordinator @Inject constructor(
                             NavigationCue.InformationalAlert("Crossing complete.", true)
                         )
                         onCrossingComplete()
-                    } else if (chunk.isNotBlank()) {
+                    } else {
                         navigationCueFlow.emit(NavigationCue.CriticalAlert(chunk, done))
                     }
                 }
@@ -224,7 +224,7 @@ class AlertCoordinator @Inject constructor(
         // Get appropriate prompt using two-phase system
         val prompt = twoPhasePromptManager.getPrompt(sessionId)
             ?: promptGenerator.generateCrossingGuidancePrompt() // Fallback to old system
-            
+
         val responseBuffer = StringBuilder()
 
         try {
@@ -243,7 +243,7 @@ class AlertCoordinator @Inject constructor(
                             )
                             // Trigger success haptic feedback
                             hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.SUCCESS)
-                            
+
                             // End the session when crossing is complete
                             twoPhasePromptManager.endSession(sessionId)
                             onCrossingComplete()
@@ -373,10 +373,15 @@ class AlertCoordinator @Inject constructor(
         try {
             aiResponseGenerator(prompt, frames)
                 .collect { (chunk, done) ->
-                    if (done && chunk.isNotBlank()) {
+                    if (chunk.isNotBlank()) {
                         // Emit navigation guidance as ambient updates
                         navigationCueFlow.emit(
                             NavigationCue.AmbientUpdate(chunk.trim(), done)
+                        )
+                    } else if (done) {
+                        // Send empty completion signal to ensure flow completes
+                        navigationCueFlow.emit(
+                            NavigationCue.AmbientUpdate("", true)
                         )
                     }
                 }
@@ -416,23 +421,21 @@ class AlertCoordinator @Inject constructor(
         try {
             aiResponseGenerator(prompt, frames)
                 .collect { (chunk, done) ->
-                    if (done && chunk.isNotBlank()) {
-                        val response = chunk.trim()
+                    val response = chunk.trim()
 
-                        // Check if object was found
-                        if (response.contains("FOUND IT", ignoreCase = true)) {
-                            navigationCueFlow.emit(
-                                NavigationCue.InformationalAlert("$target found! $response", true)
-                            )
-                            // End the session when object is found
-                            twoPhasePromptManager.endSession(sessionId)
-                            onObjectFound()
-                        } else {
-                            // Continue searching
-                            navigationCueFlow.emit(
-                                NavigationCue.AmbientUpdate(response, done)
-                            )
-                        }
+                    // Check if object was found
+                    if (response.contains("FOUND IT", ignoreCase = true)) {
+                        navigationCueFlow.emit(
+                            NavigationCue.InformationalAlert("$target found! $response", true)
+                        )
+                        // End the session when object is found
+                        twoPhasePromptManager.endSession(sessionId)
+                        onObjectFound()
+                    } else {
+                        // Continue searching
+                        navigationCueFlow.emit(
+                            NavigationCue.AmbientUpdate(response, done)
+                        )
                     }
                 }
         } catch (e: Exception) {

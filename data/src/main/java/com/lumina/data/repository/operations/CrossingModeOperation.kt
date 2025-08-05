@@ -34,11 +34,11 @@ class CrossingModeOperation @Inject constructor(
     // Throttling mechanism for crossing mode
     @Volatile
     private var lastAiRequestTime = 0L
-    private val aiRequestCooldownMs = 5000L // 5 seconds between requests
+    private val aiRequestCooldownMs = 2000L // 5 seconds between requests
 
     companion object {
         private const val TAG = "CrossingModeOperation"
-        private const val AI_REQUEST_COOLDOWN_SECONDS = 5
+        private const val AI_REQUEST_COOLDOWN_SECONDS = 2
     }
 
     fun execute(): Flow<NavigationCue> {
