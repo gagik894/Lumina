@@ -160,47 +160,6 @@ class AlertCoordinator @Inject constructor(
     }
 
     /**
-     * Coordinates crossing guidance alerts with automatic termination detection.
-     *
-     * This method handles the specialized crossing mode, monitoring for completion
-     * signals and managing the alert flow lifecycle accordingly.
-     *
-     * @param frames Current frames for AI analysis
-     * @param aiResponseGenerator Function that generates AI responses given a prompt and frames
-     * @param onCrossingComplete Callback invoked when crossing is determined to be complete
-     */
-    suspend fun coordinateCrossingGuidance(
-        frames: List<TimestampedFrame>,
-        aiResponseGenerator: suspend (String, List<TimestampedFrame>) -> Flow<Pair<String, Boolean>>,
-        onCrossingComplete: () -> Unit
-    ) {
-        Log.i(TAG, "Coordinating crossing guidance")
-
-        val prompt = promptGenerator.generateCrossingGuidancePrompt()
-
-        try {
-            aiResponseGenerator(prompt, frames)
-                .collect { (chunk, done) ->
-                    if (chunk.contains("CROSSING COMPLETE", ignoreCase = true)) {
-                        Log.i(TAG, "Crossing complete signal received from AI")
-                        navigationCueFlow.emit(
-                            NavigationCue.InformationalAlert("Crossing complete.", true)
-                        )
-                        onCrossingComplete()
-                    } else {
-                        navigationCueFlow.emit(NavigationCue.CriticalAlert(chunk, done))
-                    }
-                }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during crossing guidance", e)
-            // Emit a safety-oriented fallback message
-            navigationCueFlow.emit(
-                NavigationCue.CriticalAlert("Continue with caution", true)
-            )
-        }
-    }
-
-    /**
      * Enhanced crossing guidance with traffic light timing detection.
      *
      * This method provides advanced crossing guidance that can:

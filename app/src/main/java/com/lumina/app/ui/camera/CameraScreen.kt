@@ -47,7 +47,7 @@ data class CameraConfig(
          * Standard resolution for navigation - balanced performance and battery life
          */
         val NAVIGATION = CameraConfig(
-            resolution = Size(448, 448),
+            resolution = Size(720, 1280), // 720p resolution
             fpsRange = Range(45, 60),
             description = "Navigation Mode"
         )
@@ -56,7 +56,7 @@ data class CameraConfig(
          * High resolution for text reading - better OCR accuracy
          */
         val TEXT_READING = CameraConfig(
-            resolution = Size(1920, 71080), // Much higher resolution for text
+            resolution = Size(1080, 1920), // 1080p resolution
             fpsRange = Range(45, 60),
             description = "Text Reading Mode"
         )

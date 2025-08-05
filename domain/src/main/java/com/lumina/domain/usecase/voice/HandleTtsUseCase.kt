@@ -47,4 +47,13 @@ class HandleTtsUseCase @Inject constructor(
      * Checks if TTS is currently speaking.
      */
     fun isSpeaking(): Boolean = textToSpeechService.isSpeaking()
+
+    /**
+     * Stops the TTS engine from speaking.
+     *
+     * This method is used to stop any ongoing speech synthesis.
+     */
+    fun stopSpeaking() {
+        textToSpeechService.stop()
+    }
 }

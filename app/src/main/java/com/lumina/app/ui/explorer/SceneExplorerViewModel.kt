@@ -23,6 +23,7 @@ import com.lumina.domain.usecase.scene.FindObjectUseCase
 import com.lumina.domain.usecase.system.GetInitializationStateUseCase
 import com.lumina.domain.usecase.system.NavigationOrchestrator
 import com.lumina.domain.usecase.system.StopAllOperationsUseCase
+import com.lumina.domain.usecase.system.StopGenerationUseCase
 import com.lumina.domain.usecase.text.IdentifyCurrencyUseCase
 import com.lumina.domain.usecase.text.ReadReceiptUseCase
 import com.lumina.domain.usecase.text.ReadTextUseCase
@@ -79,6 +80,7 @@ class SceneExplorerViewModel @Inject constructor(
     private val findObject: FindObjectUseCase,
     private val askQuestionUseCase: AskQuestionUseCase,
     private val stopAllOperations: StopAllOperationsUseCase,
+    private val stopGeneration: StopGenerationUseCase,
     private val startNavigation: StartNavigationUseCase,
     private val identifyCurrency: IdentifyCurrencyUseCase,
     private val readReceipt: ReadReceiptUseCase,
@@ -190,9 +192,9 @@ class SceneExplorerViewModel @Inject constructor(
             try {
                 val stream = ByteArrayOutputStream()
                 val quality = if (cameraMode.value == CameraStateService.CameraMode.TEXT_READING) {
-                    95 // High quality for reading tasks
+                    100 // High quality for reading tasks
                 } else {
-                    50 // Standard quality for navigation and other tasks
+                    75 // Standard quality for navigation and other tasks
                 }
                 image.compress(Bitmap.CompressFormat.JPEG, quality, stream)
                 val bytes = stream.toByteArray()
@@ -209,13 +211,34 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     /**
-     * Triggers on-demand scene analysis using the most recently captured frame.
+     * Triggers on-demand scene analysis with camera activation and frame buffer delay.
+     * Activates camera, waits for frame buffer to populate, then processes scene description.
      */
     fun investigateScene() {
-        val bytes = lastFrameBytes ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            describeScene(ImageInput(bytes)).collect { cue ->
-                navigationOrchestrator.emitNavigationCue(cue)
+            try {
+                stopGeneration()
+                handleTts.stopSpeaking()
+                // Activate camera and give time for frame buffer to populate
+                manageCameraOperations.activateNavigationMode()
+                kotlinx.coroutines.delay(500) // 0.5 second delay for frame buffer
+
+                describeScene().collect { cue ->
+                    navigationOrchestrator.emitNavigationCue(cue)
+                    // Deactivate camera after scene description is complete
+                    if (cue is NavigationCue.InformationalAlert) {
+                        manageCameraOperations.deactivateCamera()
+                    }
+                }
+            } catch (e: Exception) {
+                manageCameraOperations.deactivateCamera()
+                Log.e(TAG, "Error during scene investigation", e)
+                navigationOrchestrator.emitNavigationCue(
+                    NavigationCue.InformationalAlert(
+                        message = "Error analyzing scene. Please try again.",
+                        isDone = true
+                    )
+                )
             }
         }
     }
@@ -313,6 +336,10 @@ class SceneExplorerViewModel @Inject constructor(
      * doesn't require visual input.
      */
     fun optimisticallyActivateCamera() {
+        viewModelScope.launch(Dispatchers.IO) {
+            stopGeneration()
+            handleTts.stopSpeaking()
+        }
         manageCameraOperations.optimisticallyActivateCamera()
         hapticFeedbackService.triggerHaptic(HapticFeedbackService.HapticPattern.LISTENING)
         Log.d(TAG, "🎤📸 Optimistically activated camera for voice command")
@@ -440,6 +467,10 @@ class SceneExplorerViewModel @Inject constructor(
         questionJob = viewModelScope.launch {
             askQuestionUseCase(question).collect { cue ->
                 navigationOrchestrator.emitNavigationCue(cue)
+                if (cue is NavigationCue.InformationalAlert) {
+                    // Deactivate camera if it was activated for this question
+                    manageCameraOperations.deactivateCamera()
+                }
             }
         }
     }
@@ -459,7 +490,7 @@ class SceneExplorerViewModel @Inject constructor(
 
                 identifyCurrency.identifyMultiFrame().collect { cue ->
                     navigationOrchestrator.emitNavigationCue(cue)
-                    if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                    if (cue is NavigationCue.InformationalAlert) {
                         deactivateTextReadingMode()
                     }
                 }
@@ -486,7 +517,7 @@ class SceneExplorerViewModel @Inject constructor(
 
                 readReceipt.readMultiFrame().collect { cue ->
                     navigationOrchestrator.emitNavigationCue(cue)
-                    if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                    if (cue is NavigationCue.InformationalAlert) {
                         deactivateTextReadingMode()
                     }
                 }
@@ -513,7 +544,7 @@ class SceneExplorerViewModel @Inject constructor(
 
                 readText.readMultiFrame().collect { cue ->
                     navigationOrchestrator.emitNavigationCue(cue)
-                    if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                    if (cue is NavigationCue.InformationalAlert) {
                         deactivateTextReadingMode()
                     }
                 }
@@ -582,13 +613,31 @@ class SceneExplorerViewModel @Inject constructor(
         crossingJob = null
         navigationJob?.cancel()
         navigationJob = null
-        stopAllOperations()
+        viewModelScope.launch {
+            stopAllOperations()
+        }
         deactivateCameraAndClearBuffer()
     }
 
-
     fun speak(text: String) = handleTts.speak(text, _ttsState.value)
     fun isSpeaking(): Boolean = handleTts.isSpeaking()
+
+    /**
+     * Stops all operations including AI generation and cancels all active jobs.
+     * This is called from the UI when user long-presses to interrupt everything.
+     */
+    fun stopAllOperationsAndGeneration() {
+        viewModelScope.launch {
+            try {
+                stopGeneration()
+                handleTts.stopSpeaking()
+                stopAllActiveOperations()
+                Log.d(TAG, "🛑 All operations and generation stopped by user")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping operations", e)
+            }
+        }
+    }
 
     /**
      * Haptic feedback controls

@@ -17,8 +17,8 @@ class LuminaOperations @Inject constructor(
     private val readTextOperation: ReadTextOperation,
     private val navigationOperations: NavigationOperations
 ) {
-    fun describeScene(image: ImageInput, prompt: String): Flow<NavigationCue> =
-        describeSceneOperation.execute(image, prompt)
+    fun describeScene(): Flow<NavigationCue> =
+        describeSceneOperation.executeMultiFrame()
 
     fun findObject(target: String): Flow<NavigationCue> = findObjectOperation.execute(target)
     fun askQuestion(question: String): Flow<NavigationCue> = askQuestionOperation.execute(question)

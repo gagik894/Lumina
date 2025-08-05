@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,7 +49,7 @@ class GemmaAiDataSource @Inject constructor(
 ) : AiDataSource {
 
     private val modelName = "gemma-3n-e2b-it-int4.task"
-    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var llmInference: LlmInference? = null
 
@@ -87,15 +88,14 @@ class GemmaAiDataSource @Inject constructor(
         coroutineScope.launch {
             try {
                 _initializationState.value = InitializationState.Initializing
-
                 val modelPath = getAbsoluteModelPath(modelName)
-                val options = LlmInference.LlmInferenceOptions.builder()
+                val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelPath)
                     .setPreferredBackend(LlmInference.Backend.GPU)
                     .setMaxTokens(4096)
                     .setMaxNumImages(5)
-                    .build()
 
+                val options = optionsBuilder.build()
                 llmInference = LlmInference.createFromOptions(context, options)
                 createNewSession()
 
@@ -117,7 +117,7 @@ class GemmaAiDataSource @Inject constructor(
      */
     private fun createNewSession(): LlmInferenceSession {
         val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-            .setTemperature(0.8f) // Slightly more focused responses
+            .setTemperature(1f) // Slightly more focused responses
             .setTopK(40) // Reduced for faster inference
             .setTopP(0.9f)
             .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
@@ -188,15 +188,8 @@ class GemmaAiDataSource @Inject constructor(
             // Estimate tokens for images (conservative estimate)
             approximateTokenCount += frames.size * 200
 
-            val uniqueChunks = mutableSetOf<String>()
-
             currentSession.generateResponseAsync { partialResult, done ->
                 Log.d(TAG, "generateResponse: Partial result: $partialResult, Done: $done")
-
-                val chunk = partialResult.trim()
-                if (chunk.isNotEmpty()) uniqueChunks.add(chunk)
-
-
                 val finalFlag = done
 
                 if (finalFlag) {
@@ -309,6 +302,24 @@ class GemmaAiDataSource @Inject constructor(
             Log.d(TAG, "Resources closed")
         } catch (e: Exception) {
             Log.e(TAG, "Error closing resources", e)
+        }
+    }
+
+    override suspend fun stopGeneration() {
+        Log.d(TAG, "stopGeneration: Canceling all ongoing operations")
+        try {
+            // Cancel any ongoing generation
+            navigationSession?.cancelGenerateResponseAsync()
+
+            // Cancel the coroutine scope to stop any running flows
+            coroutineScope.cancel()
+
+            // Create a new scope for future operations
+            coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+            Log.d(TAG, "stopGeneration: All operations canceled successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during stopGeneration", e)
         }
     }
 

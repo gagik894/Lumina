@@ -44,11 +44,9 @@ interface LuminaRepository {
     /**
      * Describes a scene based on the provided image and prompt. This is a one-shot operation.
      *
-     * @param image The image input to be processed.
-     * @param prompt The prompt to guide the description generation.
      * @return A flow of navigation cues containing the scene description.
      */
-    fun describeScene(image: ImageInput, prompt: String): Flow<NavigationCue>
+    fun describeScene(): Flow<NavigationCue>
 
     /**
      * Initiates a transient street-crossing guidance mode.
@@ -129,4 +127,11 @@ interface LuminaRepository {
      * @return A flow of navigation cues containing the text content.
      */
     fun readTextMultiFrame(): Flow<NavigationCue>
+
+    /**
+     * Stops the current generation process, if applicable.
+     *
+     * This method is useful if the user decides to cancel an ongoing request or operation.
+     */
+    suspend fun stopGeneration()
 }

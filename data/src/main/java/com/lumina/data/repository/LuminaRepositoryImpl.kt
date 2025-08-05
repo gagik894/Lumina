@@ -47,10 +47,7 @@ class LuminaRepositoryImpl @Inject constructor(
         frameBufferManager.processNewFrame(image)
     }
 
-    override fun describeScene(
-        image: ImageInput,
-        prompt: String
-    ): Flow<NavigationCue> = luminaOperations.describeScene(image, prompt)
+    override fun describeScene(): Flow<NavigationCue> = luminaOperations.describeScene()
 
     override fun findObject(target: String): Flow<NavigationCue> =
         luminaOperations.findObject(target)
@@ -79,5 +76,9 @@ class LuminaRepositoryImpl @Inject constructor(
 
     override fun stopAllOperations() {
         navigationModeManager.stopAllModes()
+    }
+
+    override suspend fun stopGeneration() {
+        gemmaDataSource.stopGeneration()
     }
 }

@@ -43,19 +43,26 @@ class PromptGenerationService @Inject constructor() {
             ""
         }
 
-        return "fast describe image, just most important for a blind.$objectContext"
+        return "fast describe image, just most important for a visually impaired.$objectContext"
     }
 
     /**
      * Generates a prompt for ambient environmental updates.
      *
      * This prompt is used for general scene description when no immediate threats
-     * or new objects are detected, providing broad situational awareness.
+     * or new objects are detected, providing broad situational awareness with focus
+     * on critical navigational elements that visually impaired users need for orientation.
      *
-     * @return Prompt for general environmental description
+     * @return Prompt for general environmental description optimized for a visually impaired navigation
      */
     fun generateAmbientUpdatePrompt(): String {
-        return "Briefly describe the general surroundings for a blind user."
+        return "Describe essential navigation elements for a visually impaired user. PRIORITIZE: " +
+                "1) Sidewalk conditions (ends, narrowing, obstacles) " +
+                "2) Intersections and crossroads ahead " +
+                "3) Changes in terrain (steps, slopes, surface changes) " +
+                "4) Landmarks for orientation (buildings, poles, benches) " +
+                "5) Potential hazards (construction, puddles, crowd). " +
+                "Be concise and specific about distances and directions. Max 3 sentences."
     }
 
     /**
@@ -96,7 +103,7 @@ class PromptGenerationService @Inject constructor() {
      * @return Minimal prompt for continued crossing analysis
      */
     fun generateCrossingGuidanceFollowUpPrompt(): String {
-        return "Analyze crossing safety: tell 'CROSSING COMPLETE' - user has reached the other side safely (IMPORTANT: Say this when user is clearly on the destination sidewalk or curb)"
+        return "Analyze crossing safety"
     }
 
     /**
@@ -250,7 +257,7 @@ class PromptGenerationService @Inject constructor() {
      * @return Prompt designed for organized document text extraction
      */
     fun generateReceiptReadingPrompt(): String {
-        return "RECEIPT READING ASSISTANT for BLIND user.\n\n" +
+        return "RECEIPT READING ASSISTANT for a visually impaired user.\n\n" +
                 "READ IN ORDER:\n" +
                 "1. Main items with prices\n" +
                 "2. Subtotal, tax, and total amount\n" +
@@ -275,7 +282,7 @@ class PromptGenerationService @Inject constructor() {
      * @return Prompt for comprehensive text extraction and reading
      */
     fun generateTextReadingPrompt(): String {
-        return "TEXT READING ASSISTANT for BLIND user.\n\n" +
+        return "TEXT READING ASSISTANT for a visually impaired user.\n\n" +
                 "READ IN ORDER:\n" +
                 "1. Largest or most prominent text first\n" +
                 "2. Headlines and titles\n" +
@@ -329,6 +336,18 @@ class PromptGenerationService @Inject constructor() {
     fun generateMultiFrameTextPrompt(): String {
         return "You will receive multiple frames showing the same text or document from slightly different angles or lighting. " +
                 generateTextReadingPrompt()
+    }
+
+    /**
+     * Generates a prompt for a general scene description.
+     *
+     * This prompt is used for on-demand scene descriptions, focusing on aspects
+     * most relevant to a visually impaired user for orientation and safety.
+     *
+     * @return Prompt for general scene description
+     */
+    fun generateDescribeScenePrompt(): String {
+        return "Describe this scene for a person who is blind. Focus on key objects, layout, and potential obstacles. Be clear and concise."
     }
 
     /**

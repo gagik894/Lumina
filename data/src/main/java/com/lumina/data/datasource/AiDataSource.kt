@@ -39,7 +39,6 @@ interface AiDataSource {
         useHighResolution: Boolean = false
     ): Flow<Pair<String, Boolean>>
 
-
     /**
      * Resets the current session, clearing any state or cached data.
      * This is useful for starting a new session without residual data from previous interactions.
@@ -51,4 +50,10 @@ interface AiDataSource {
      * This method should be called when the data source is no longer needed to free up resources.
      */
     fun close()
+
+    /**
+     * Stops the current generation process.
+     * This is useful if the user decides to cancel an ongoing request.
+     */
+    suspend fun stopGeneration()
 }
