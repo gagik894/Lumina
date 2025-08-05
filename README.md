@@ -73,6 +73,15 @@ The application follows a clean architecture pattern, separating concerns into `
 `app` (presentation) layers. The `domain` layer contains the core business logic and use cases,
 making the application modular and testable.
 
+### Privacy-First and Offline-Ready
+
+A core principle of Lumina is user privacy. All AI processing is done **100% on-device** thanks to
+the efficiency of the Gemma 3n model. This means:
+
+- No user data (images, audio, or voice commands) ever leaves the device.
+- The application is fully functional without an internet connection, making it reliable in any
+  situation.
+
 ## How to Build
 
 This is a standard Android Gradle project. You can build it using Android Studio or from the command
