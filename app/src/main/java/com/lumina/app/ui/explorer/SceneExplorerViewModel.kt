@@ -11,7 +11,6 @@ import com.lumina.domain.model.NavigationCueType
 import com.lumina.domain.model.VoiceCommand
 import com.lumina.domain.service.CameraStateService
 import com.lumina.domain.service.HapticFeedbackService
-import com.lumina.domain.service.TextToSpeechService
 import com.lumina.domain.usecase.camera.ManageCameraOperationsUseCase
 import com.lumina.domain.usecase.camera.ManageFrameThrottlingUseCase
 import com.lumina.domain.usecase.camera.ProcessFrameUseCase
@@ -21,7 +20,7 @@ import com.lumina.domain.usecase.scene.AskQuestionUseCase
 import com.lumina.domain.usecase.scene.DescribeSceneUseCase
 import com.lumina.domain.usecase.scene.FindObjectUseCase
 import com.lumina.domain.usecase.system.GetInitializationStateUseCase
-import com.lumina.domain.usecase.system.ProcessNavigationCueFlowUseCase
+import com.lumina.domain.usecase.system.NavigationOrchestrator
 import com.lumina.domain.usecase.system.StopAllOperationsUseCase
 import com.lumina.domain.usecase.text.IdentifyCurrencyUseCase
 import com.lumina.domain.usecase.text.ReadReceiptUseCase
@@ -31,15 +30,10 @@ import com.lumina.domain.usecase.voice.ProcessVoiceCommandUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -75,7 +69,7 @@ class SceneExplorerViewModel @Inject constructor(
     private val processFrame: ProcessFrameUseCase,
     private val manageFrameThrottling: ManageFrameThrottlingUseCase,
     private val processVoiceCommand: ProcessVoiceCommandUseCase,
-    private val processNavigationCueFlow: ProcessNavigationCueFlowUseCase,
+    private val navigationOrchestrator: NavigationOrchestrator,
     private val handleTts: HandleTtsUseCase,
     private val manageCameraOperations: ManageCameraOperationsUseCase,
     private val describeScene: DescribeSceneUseCase,
@@ -88,7 +82,6 @@ class SceneExplorerViewModel @Inject constructor(
     private val readReceipt: ReadReceiptUseCase,
     private val readText: ReadTextUseCase,
     private val cameraStateService: CameraStateService,
-    private val textToSpeechService: TextToSpeechService,
     private val hapticFeedbackService: HapticFeedbackService
 ) : ViewModel() {
 
@@ -97,16 +90,11 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     // TTS state tracking - separate from service to handle initialization lifecycle
-    private var isTtsInitialized = false
     private val _ttsState = MutableStateFlow(false)
 
     // Cached frame for immediate reuse in on-demand operations (investigate, voice commands)
     // Avoids waiting for next camera callback when user requests immediate analysis
     private var lastFrameBytes: ByteArray? = null
-
-    // Bridges user-initiated actions (voice, gestures) into the main navigation pipeline
-    // Allows manual cues to be processed alongside automatic camera-driven cues
-    private val manualCueFlow = MutableSharedFlow<NavigationCue>()
 
     // Coroutine job lifecycle management for concurrent operations
     // Each operation type gets its own job to allow selective cancellation
@@ -120,54 +108,27 @@ class SceneExplorerViewModel @Inject constructor(
     val isCameraActive = cameraStateService.isActive
 
     init {
-        initializeTextToSpeech()
+        initializeTtsStateOnly()
     }
 
     /**
-     * Main navigation cue flow with reactive TTS processing.
+     * Initializes TTS state tracking for UI purposes.
      */
-    private val navigationCueFlow = merge(
-        cameraStateService.currentMode.flatMapLatest { mode ->
-            if (mode == CameraStateService.CameraMode.NAVIGATION && navigationJob?.isActive == true) {
-                emptyFlow()
-            } else {
-                emptyFlow()
-            }
-        },
-        manualCueFlow
-    ).onEach { navigationCue ->
-        // Handle TTS reactively based on current state
-        Log.d(
-            TAG,
-            "🔊 Processing NavigationCue: ${navigationCue.javaClass.simpleName}, TTS enabled: ${_ttsState.value}"
-        )
-
-        if (_ttsState.value) {
-            val message = when (navigationCue) {
-                is NavigationCue.CriticalAlert -> navigationCue.message
-                is NavigationCue.InformationalAlert -> navigationCue.message
-                is NavigationCue.AmbientUpdate -> navigationCue.message
-            }
-
-            // Skip empty strings generated while the model is thinking
-            if (message.isNotBlank()) {
-                Log.d(TAG, "🎤 Speaking message: '$message'")
-                textToSpeechService.speak(navigationCue)
-            } else {
-                Log.d(TAG, "🤐 Skipping empty message")
-            }
-        } else {
-            Log.d(TAG, "🔇 TTS disabled, not speaking")
-        }
+    private fun initializeTtsStateOnly() {
+        _ttsState.value = true
+        Log.d(TAG, "TTS state initialized for UI")
     }
 
     /**
-     * UI state flow using domain use case for processing.
+     * UI state flow combining initialization status, navigation cues, and TTS state.
      */
     val uiState: StateFlow<SceneExplorerUiState> =
         combine(
             getInitializationState(),
-            processNavigationCueFlow.processFlow(navigationCueFlow),
+            navigationOrchestrator.createNavigationFlow(
+                automaticCueFlow = startNavigation.invoke(), // Use the use case's Flow directly
+                isTtsEnabled = _ttsState
+            ),
             _ttsState
         ) { initState, (description, alertType), ttsInitialized ->
             SceneExplorerUiState(
@@ -217,17 +178,12 @@ class SceneExplorerViewModel @Inject constructor(
 
     /**
      * Triggers on-demand scene analysis using the most recently captured frame.
-     *
-     * Provides detailed environmental description for user orientation and context.
-     * Uses cached frame data to avoid camera activation delays during user interaction.
-     * Results are delivered through the standard NavigationCue pipeline for consistent
-     * UI presentation and TTS integration.
      */
     fun investigateScene() {
         val bytes = lastFrameBytes ?: return
         viewModelScope.launch(Dispatchers.IO) {
             describeScene(ImageInput(bytes)).collect { cue ->
-                manualCueFlow.emit(cue)
+                navigationOrchestrator.emitNavigationCue(cue)
             }
         }
     }
@@ -344,11 +300,11 @@ class SceneExplorerViewModel @Inject constructor(
             try {
                 manageCameraOperations.activateNavigationMode()
                 startNavigation.invoke().collect { cue ->
-                    manualCueFlow.emit(cue)
+                    navigationOrchestrator.emitNavigationCue(cue)
                 }
             } catch (e: Exception) {
                 manageCameraOperations.deactivateCamera()
-                manualCueFlow.emit(
+                navigationOrchestrator.emitNavigationCue(
                     NavigationCue.InformationalAlert(
                         message = "Error during navigation. Please try again.",
                         isDone = true
@@ -390,14 +346,14 @@ class SceneExplorerViewModel @Inject constructor(
             try {
                 manageCameraOperations.activateNavigationMode()
                 findObject(target).collect { cue ->
-                    manualCueFlow.emit(cue)
+                    navigationOrchestrator.emitNavigationCue(cue)
                     if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                         manageCameraOperations.deactivateCamera()
                     }
                 }
             } catch (e: Exception) {
                 manageCameraOperations.deactivateCamera()
-                manualCueFlow.emit(
+                navigationOrchestrator.emitNavigationCue(
                     NavigationCue.InformationalAlert(
                         message = "Error finding object. Please try again.",
                         isDone = true
@@ -421,14 +377,14 @@ class SceneExplorerViewModel @Inject constructor(
             try {
                 manageCameraOperations.activateNavigationMode()
                 startCrossingModeUseCase().collect { cue ->
-                    manualCueFlow.emit(cue)
+                    navigationOrchestrator.emitNavigationCue(cue)
                     if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                         manageCameraOperations.deactivateCamera()
                     }
                 }
             } catch (e: Exception) {
                 manageCameraOperations.deactivateCamera()
-                manualCueFlow.emit(
+                navigationOrchestrator.emitNavigationCue(
                     NavigationCue.InformationalAlert(
                         message = "Error during crossing session. Please try again.",
                         isDone = true
@@ -451,7 +407,7 @@ class SceneExplorerViewModel @Inject constructor(
         questionJob?.cancel()
         questionJob = viewModelScope.launch {
             askQuestionUseCase(question).collect { cue ->
-                manualCueFlow.emit(cue)
+                navigationOrchestrator.emitNavigationCue(cue)
             }
         }
     }
@@ -473,7 +429,7 @@ class SceneExplorerViewModel @Inject constructor(
                 if (frameBytes != null) {
                     val imageInput = ImageInput(frameBytes)
                     identifyCurrency(imageInput).collect { cue ->
-                        manualCueFlow.emit(cue)
+                        navigationOrchestrator.emitNavigationCue(cue)
                         if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                             deactivateTextReadingMode()
                         }
@@ -509,7 +465,7 @@ class SceneExplorerViewModel @Inject constructor(
                 if (frameBytes != null) {
                     val imageInput = ImageInput(frameBytes)
                     readReceipt(imageInput).collect { cue ->
-                        manualCueFlow.emit(cue)
+                        navigationOrchestrator.emitNavigationCue(cue)
                         if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                             deactivateTextReadingMode()
                         }
@@ -545,7 +501,7 @@ class SceneExplorerViewModel @Inject constructor(
                 if (frameBytes != null) {
                     val imageInput = ImageInput(frameBytes)
                     readText(imageInput).collect { cue ->
-                        manualCueFlow.emit(cue)
+                        navigationOrchestrator.emitNavigationCue(cue)
                         if (cue is NavigationCue.InformationalAlert && cue.isDone) {
                             deactivateTextReadingMode()
                         }
@@ -582,25 +538,6 @@ class SceneExplorerViewModel @Inject constructor(
     }
 
     // Utility methods
-
-    /**
-     * Initializes Text-to-Speech service with callback handling for success and error states.
-     *
-     * Manages TTS state transitions and provides logging for debugging initialization issues.
-     * Updates internal state flow to enable reactive TTS processing throughout the application.
-     */
-    private fun initializeTextToSpeech() {
-        textToSpeechService.initialize(
-            onInitialized = {
-                _ttsState.value = true
-                Log.d(TAG, "TTS initialized successfully")
-            },
-            onError = { error ->
-                Log.e(TAG, "TTS initialization failed: $error")
-                _ttsState.value = false
-            }
-        )
-    }
 
     /**
      * Deactivates camera and clears processing buffers after text reading operations.
@@ -673,13 +610,11 @@ class SceneExplorerViewModel @Inject constructor(
      *
      * Actions performed:
      * - Stops all active operations (find, crossing, navigation).
-     * - Shuts down the Text-to-Speech service.
      * - Deactivates the camera.
      */
     override fun onCleared() {
         super.onCleared()
         stopAllActiveOperations()
-        textToSpeechService.shutdown()
         manageCameraOperations.deactivateCamera()
     }
 }
