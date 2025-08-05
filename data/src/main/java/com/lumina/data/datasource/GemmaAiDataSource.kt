@@ -170,11 +170,9 @@ class GemmaAiDataSource @Inject constructor(
                 frames.last().timestampMs - frames.first().timestampMs
             } else 0L
 
-            val motionContextPrompt = buildMotionContextPrompt(prompt, frames.size, timeSpanMs)
-
             // Add prompt and track tokens
-            currentSession.addQueryChunk(motionContextPrompt)
-            approximateTokenCount += estimateTokens(motionContextPrompt)
+            currentSession.addQueryChunk(prompt)
+            approximateTokenCount += estimateTokens(prompt)
 
             // Add frames in chronological order
             frames.forEach { frame ->
@@ -220,24 +218,6 @@ class GemmaAiDataSource @Inject constructor(
         }
     }
 
-    /**
-     * Builds a motion-aware prompt that helps the AI understand timing and movement.
-     */
-    private fun buildMotionContextPrompt(
-        userPrompt: String,
-        frameCount: Int,
-        timeSpanMs: Long
-    ): String {
-        val motionContext = when {
-            frameCount == 1 -> "Analyze this single frame."
-            timeSpanMs > 0 -> "Analyze $frameCount frames captured over ${timeSpanMs}ms. " +
-                    "Identify any movement, direction changes, or objects entering/leaving the scene."
-
-            else -> "Analyze these $frameCount sequential frames for movement patterns."
-        }
-
-        return "$motionContext $userPrompt"
-    }
 
     /**
      * Scales image to optimal size for processing, preventing OOM while maintaining quality.
@@ -312,9 +292,10 @@ class GemmaAiDataSource @Inject constructor(
      * Returns the system prompt for token estimation.
      */
     private fun getSystemPrompt(): String {
-        return """You are an AI assistant for blind users providing real-time navigation assistance.
+        return """You are an AI assistant for visually impaired users providing real-time navigation assistance.
             CRITICAL RULES:
             - Be extremely concise and direct
+            - If you are not certain, express your uncertainty. For example, say 'It looks like...' or 'I think...'.
             """
     }
 

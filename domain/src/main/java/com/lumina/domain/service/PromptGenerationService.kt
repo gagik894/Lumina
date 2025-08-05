@@ -139,43 +139,6 @@ class PromptGenerationService @Inject constructor() {
         return "Path ahead:"
     }
 
-    /**
-     * Generates initial context-setting prompt for object finding mode.
-     *
-     * This comprehensive prompt establishes the AI's role for targeted object detection
-     * and location guidance. Sent only once at object finding mode initialization.
-     *
-     * @param target The object to search for
-     * @return Full context prompt for object finding mode initialization
-     */
-    fun generateObjectFindingInitialPrompt(target: String): String {
-        return "OBJECT DETECTION ASSISTANT for BLIND user.\n\n" +
-                "ROLE: Help user locate a '$target'. I will send you multiple frames from their perspective. " +
-                "For each frame, search for the target object and provide location guidance.\n\n" +
-                "ANALYZE:\n" +
-                "- Is the '$target' visible in the frame?\n" +
-                "- If yes: exact position (left, right, center, near, far)\n" +
-                "- If no: suggest search direction\n" +
-                "- Distance estimation if possible\n\n" +
-                "RESPONSES:\n" +
-                "- 'NOT VISIBLE' - target not in current view\n" +
-                "- 'TURN LEFT' or 'TURN RIGHT' - search suggestions\n" +
-                "- 'STRAIGHT AHEAD' - target directly in front\n" +
-                "- 'TO YOUR LEFT' or 'TO YOUR RIGHT' - target positioning\n" +
-                "- 'VERY CLOSE' or 'FAR AWAY' - distance indicators\n" +
-                "- 'FOUND IT' - target clearly identified and reachable\n\n" +
-                "Keep responses under 10 words. Be precise about direction and distance."
-    }
-
-    /**
-     * Generates minimal follow-up prompt for subsequent object finding frames.
-     *
-     * @param target The object being searched for
-     * @return Minimal prompt for continued object detection
-     */
-    fun generateObjectFindingFollowUpPrompt(target: String): String {
-        return "Find $target:"
-    }
 
     /**
      * Generates a prompt for binary object detection (yes/no).
@@ -200,7 +163,12 @@ class PromptGenerationService @Inject constructor() {
      * @return Prompt for spatial object description
      */
     fun generateObjectLocationPrompt(target: String): String {
-        return "Describe the location of the $target relative to the user."
+        return "Describe the location of the >target relative to the user. " +
+                "If it's a place like a store/pharmacy/building: provide clear directions on how to get there, including distance, direction, and any navigation cues. " +
+                "If it's a small object (like a remote, phone, keys): describe its precise location in detail that helps a blind user find it by touch, e.g., '3 feet ahead on the coffee table next to the couch', 'on the kitchen counter near the sink'. " +
+                "If the object is not visible, say 'I cannot see the target'. " +
+                "If the object is too far away to describe accurately, say 'The $target is too far away to describe'. " +
+                "Keep directions concise but complete enough for a visually impaired user to navigate or locate the item."
     }
 
     /**
@@ -226,9 +194,7 @@ class PromptGenerationService @Inject constructor() {
      * @return Contextualized prompt for question answering
      */
     fun generateQuestionAnsweringPrompt(question: String): String {
-        return "Based on the image, answer the user's question: $question. " +
-                "If you are not certain, express your uncertainty. For example, say 'It looks like...' or 'I think...'. " +
-                "Provide a confidence level if possible, e.g., 'I'm about 80% sure'."
+        return "Based on the image, answer the user's question: $question. "
     }
 
     /**
@@ -262,7 +228,7 @@ class PromptGenerationService @Inject constructor() {
      * @return Prompt optimized for currency recognition with clear response patterns
      */
     fun generateCurrencyIdentificationPrompt(): String {
-        return "CURRENCY IDENTIFICATION ASSISTANT for BLIND user.\n\n" +
+        return "CURRENCY IDENTIFICATION ASSISTANT for visually impaired user.\n\n" +
                 "ANALYZE:\n" +
                 "- Written numbers and text on currency\n" +
                 "- Colors, patterns, and visual features\n" +
@@ -288,16 +254,13 @@ class PromptGenerationService @Inject constructor() {
     fun generateReceiptReadingPrompt(): String {
         return "RECEIPT READING ASSISTANT for BLIND user.\n\n" +
                 "READ IN ORDER:\n" +
-                "1. Business name and date (if visible)\n" +
-                "2. Main items with prices\n" +
-                "3. Subtotal, tax, and total amount\n" +
-                "4. Payment method (if shown)\n\n" +
+                "1. Main items with prices\n" +
+                "2. Subtotal, tax, and total amount\n" +
                 "SKIP:\n" +
                 "- Receipt numbers and barcodes\n" +
                 "- Store addresses (unless specifically relevant)\n" +
                 "- Promotional text and disclaimers\n\n" +
                 "RESPONSES:\n" +
-                "- Start with business name: 'Receipt from [Business Name]'\n" +
                 "- For unclear text: 'Cannot read [section]'\n" +
                 "- For missing info: 'No [item] visible'\n" +
                 "- End with: 'Total: [amount]' or 'Total not visible'\n\n" +
@@ -375,7 +338,6 @@ class PromptGenerationService @Inject constructor() {
     enum class OperationMode {
         CROSSING_GUIDANCE,      // Continuous - uses two-phase prompting
         NAVIGATION_GUIDANCE,    // Continuous - uses two-phase prompting  
-        OBJECT_FINDING         // Continuous - uses two-phase prompting
     }
 
     /**
@@ -389,10 +351,6 @@ class PromptGenerationService @Inject constructor() {
         return when (mode) {
             OperationMode.CROSSING_GUIDANCE -> generateCrossingGuidanceInitialPrompt()
             OperationMode.NAVIGATION_GUIDANCE -> generateNavigationGuidanceInitialPrompt()
-            OperationMode.OBJECT_FINDING -> {
-                requireNotNull(target) { "Target must be provided for object finding mode" }
-                generateObjectFindingInitialPrompt(target)
-            }
         }
     }
 
@@ -407,10 +365,6 @@ class PromptGenerationService @Inject constructor() {
         return when (mode) {
             OperationMode.CROSSING_GUIDANCE -> generateCrossingGuidanceFollowUpPrompt()
             OperationMode.NAVIGATION_GUIDANCE -> generateNavigationGuidanceFollowUpPrompt()
-            OperationMode.OBJECT_FINDING -> {
-                requireNotNull(target) { "Target must be provided for object finding mode" }
-                generateObjectFindingFollowUpPrompt(target)
-            }
         }
     }
 }
