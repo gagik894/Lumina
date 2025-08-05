@@ -28,14 +28,14 @@ class LuminaOperations @Inject constructor(
 
     fun readReceipt(image: ImageInput): Flow<NavigationCue> = readReceiptOperation.execute(image)
     fun readText(image: ImageInput): Flow<NavigationCue> = readTextOperation.execute(image)
-    fun identifyCurrencyMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
-        identifyCurrencyOperation.executeMultiFrame(images)
+    fun identifyCurrencyMultiFrame(): Flow<NavigationCue> =
+        identifyCurrencyOperation.executeMultiFrame()
 
-    fun readReceiptMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
-        readReceiptOperation.executeMultiFrame(images)
+    fun readReceiptMultiFrame(): Flow<NavigationCue> =
+        readReceiptOperation.executeMultiFrame()
 
-    fun readTextMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
-        readTextOperation.executeMultiFrame(images)
+    fun readTextMultiFrame(): Flow<NavigationCue> =
+        readTextOperation.executeMultiFrame()
 
     fun startNavigation(): Flow<NavigationCue> = navigationOperations.execute()
 }

@@ -46,7 +46,7 @@ class IdentifyCurrencyUseCase @Inject constructor(
      * @param images List of image inputs containing frames of the same currency.
      * @return A flow of NavigationCue containing currency identification details
      */
-    fun identifyMultiFrame(images: List<ImageInput>): Flow<NavigationCue> {
-        return repository.identifyCurrencyMultiFrame(images)
+    fun identifyMultiFrame(): Flow<NavigationCue> {
+        return repository.identifyCurrencyMultiFrame()
     }
 }

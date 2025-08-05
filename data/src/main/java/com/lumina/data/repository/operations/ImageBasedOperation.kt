@@ -58,21 +58,25 @@ abstract class ImageBasedOperation(
         }
     }
 
-    fun executeMultiFrame(images: List<ImageInput>): Flow<NavigationCue> {
+    fun executeMultiFrame(): Flow<NavigationCue> {
         return callbackFlow {
             try {
                 transientOperationCoordinator.executeTransientOperation(getOperationName() + "_multi") {
                     if (!isActive) return@executeTransientOperation
 
-                    images.forEach { image ->
-                        val bitmap = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
-                        frameBufferManager?.addFrame(bitmap, System.currentTimeMillis())
+                    if (frameBufferManager == null) {
+                        trySend(
+                            NavigationCue.InformationalAlert(
+                                "Frame buffer manager is not available. Please try again.",
+                                true
+                            )
+                        )
+                        close()
+                        return@executeTransientOperation
                     }
 
-                    kotlinx.coroutines.delay(200)
-
-                    val qualityFrames = frameBufferManager?.getMotionAnalysisFrames()
-                    if (qualityFrames.isNullOrEmpty()) {
+                    val qualityFrames = frameBufferManager.getMotionAnalysisFrames()
+                    if (qualityFrames.isEmpty()) {
                         trySend(
                             NavigationCue.InformationalAlert(
                                 "No quality frames available. Please try again.",

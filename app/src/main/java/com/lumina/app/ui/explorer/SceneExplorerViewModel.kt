@@ -161,7 +161,7 @@ class SceneExplorerViewModel @Inject constructor(
                     )
                 )
             }
-           
+
             SceneExplorerUiState(
                 initializationState = initState,
                 description = description,
@@ -456,23 +456,14 @@ class SceneExplorerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 manageCameraOperations.activateTextReadingMode()
-                val frameBytes = manageCameraOperations.waitForFrame { lastFrameBytes }
 
-                if (frameBytes != null) {
-                    val imageInput = ImageInput(frameBytes)
-                    identifyCurrency(imageInput).collect { cue ->
-                        navigationOrchestrator.emitNavigationCue(cue)
-                        if (cue is NavigationCue.InformationalAlert && cue.isDone) {
-                            deactivateTextReadingMode()
-                        }
+                identifyCurrency.identifyMultiFrame().collect { cue ->
+                    navigationOrchestrator.emitNavigationCue(cue)
+                    if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                        deactivateTextReadingMode()
                     }
-                } else {
-                    deactivateTextReadingMode()
-                    handleTts.speak(
-                        "No image available. Please ensure camera is working and try again.",
-                        _ttsState.value
-                    )
                 }
+
             } catch (e: Exception) {
                 deactivateTextReadingMode()
                 handleTts.speak("Error identifying currency. Please try again.", _ttsState.value)
@@ -492,23 +483,14 @@ class SceneExplorerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 manageCameraOperations.activateTextReadingMode()
-                val frameBytes = manageCameraOperations.waitForFrame { lastFrameBytes }
 
-                if (frameBytes != null) {
-                    val imageInput = ImageInput(frameBytes)
-                    readReceipt(imageInput).collect { cue ->
-                        navigationOrchestrator.emitNavigationCue(cue)
-                        if (cue is NavigationCue.InformationalAlert && cue.isDone) {
-                            deactivateTextReadingMode()
-                        }
+                readReceipt.readMultiFrame().collect { cue ->
+                    navigationOrchestrator.emitNavigationCue(cue)
+                    if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                        deactivateTextReadingMode()
                     }
-                } else {
-                    deactivateTextReadingMode()
-                    handleTts.speak(
-                        "No image available. Please ensure camera is working and try again.",
-                        _ttsState.value
-                    )
                 }
+
             } catch (e: Exception) {
                 deactivateTextReadingMode()
                 handleTts.speak("Error reading receipt. Please try again.", _ttsState.value)
@@ -528,23 +510,14 @@ class SceneExplorerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 manageCameraOperations.activateTextReadingMode()
-                val frameBytes = manageCameraOperations.waitForFrame { lastFrameBytes }
 
-                if (frameBytes != null) {
-                    val imageInput = ImageInput(frameBytes)
-                    readText(imageInput).collect { cue ->
-                        navigationOrchestrator.emitNavigationCue(cue)
-                        if (cue is NavigationCue.InformationalAlert && cue.isDone) {
-                            deactivateTextReadingMode()
-                        }
+                readText.readMultiFrame().collect { cue ->
+                    navigationOrchestrator.emitNavigationCue(cue)
+                    if (cue is NavigationCue.InformationalAlert && cue.isDone) {
+                        deactivateTextReadingMode()
                     }
-                } else {
-                    deactivateTextReadingMode()
-                    handleTts.speak(
-                        "No image available. Please ensure camera is working and try again.",
-                        _ttsState.value
-                    )
                 }
+
             } catch (e: Exception) {
                 deactivateTextReadingMode()
                 handleTts.speak("Error reading text. Please try again.", _ttsState.value)

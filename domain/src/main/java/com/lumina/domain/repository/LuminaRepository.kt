@@ -110,7 +110,7 @@ interface LuminaRepository {
      * @param images List of images containing the same currency from different angles/moments.
      * @return A flow of navigation cues containing currency identification details.
      */
-    fun identifyCurrencyMultiFrame(images: List<ImageInput>): Flow<NavigationCue>
+    fun identifyCurrencyMultiFrame(): Flow<NavigationCue>
 
     /**
      * Reads receipt or document text from multiple frames for better accuracy. This is a one-shot operation.
@@ -119,7 +119,7 @@ interface LuminaRepository {
      * @param images List of images containing the same document from different angles/moments.
      * @return A flow of navigation cues containing the organized text content.
      */
-    fun readReceiptMultiFrame(images: List<ImageInput>): Flow<NavigationCue>
+    fun readReceiptMultiFrame(): Flow<NavigationCue>
 
     /**
      * Reads general text from multiple frames for better accuracy. This is a one-shot operation.
@@ -128,5 +128,5 @@ interface LuminaRepository {
      * @param images List of images containing the same text from different angles/moments.
      * @return A flow of navigation cues containing the text content.
      */
-    fun readTextMultiFrame(images: List<ImageInput>): Flow<NavigationCue>
+    fun readTextMultiFrame(): Flow<NavigationCue>
 }

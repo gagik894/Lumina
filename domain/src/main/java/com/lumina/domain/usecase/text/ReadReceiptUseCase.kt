@@ -34,4 +34,20 @@ class ReadReceiptUseCase @Inject constructor(
     operator fun invoke(image: ImageInput): Flow<NavigationCue> {
         return repository.readReceipt(image)
     }
+
+    /**
+     * Invokes the use case to read multiple frames of a receipt for better accuracy.
+     *
+     * The AI will analyze multiple frames of the same receipt to extract:
+     * - Business name and contact information with improved accuracy
+     * - Date and time of transaction
+     * - Itemized list of purchases with prices
+     * - Subtotal, tax, and total amounts
+     * - Payment method and change information
+     *
+     * @return A flow of NavigationCue containing organized receipt information
+     */
+    fun readMultiFrame(): Flow<NavigationCue> {
+        return repository.readReceiptMultiFrame()
+    }
 }

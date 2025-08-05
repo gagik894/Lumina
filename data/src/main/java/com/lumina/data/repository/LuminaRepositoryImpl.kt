@@ -68,14 +68,14 @@ class LuminaRepositoryImpl @Inject constructor(
 
     override fun readText(image: ImageInput): Flow<NavigationCue> = luminaOperations.readText(image)
 
-    override fun identifyCurrencyMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
-        luminaOperations.identifyCurrencyMultiFrame(images)
+    override fun identifyCurrencyMultiFrame(): Flow<NavigationCue> =
+        luminaOperations.identifyCurrencyMultiFrame()
 
-    override fun readReceiptMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
-        luminaOperations.readReceiptMultiFrame(images)
+    override fun readReceiptMultiFrame(): Flow<NavigationCue> =
+        luminaOperations.readReceiptMultiFrame()
 
-    override fun readTextMultiFrame(images: List<ImageInput>): Flow<NavigationCue> =
-        luminaOperations.readTextMultiFrame(images)
+    override fun readTextMultiFrame(): Flow<NavigationCue> =
+        luminaOperations.readTextMultiFrame()
 
     override fun stopAllOperations() {
         navigationModeManager.stopAllModes()

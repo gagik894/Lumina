@@ -34,4 +34,18 @@ class ReadTextUseCase @Inject constructor(
     operator fun invoke(image: ImageInput): Flow<NavigationCue> {
         return repository.readText(image)
     }
+
+    /**
+     * Invokes the use case to read text from multiple frames of an image for better accuracy.
+     *
+     * The AI will analyze multiple frames of the same text content to ensure:
+     * - Improved accuracy in text extraction
+     * - Better handling of complex layouts or overlapping text
+     * - Enhanced recognition of fine details and small print
+     *
+     * @return A flow of NavigationCue containing systematically organized text content
+     */
+    fun readMultiFrame(): Flow<NavigationCue> {
+        return repository.readTextMultiFrame()
+    }
 }
