@@ -262,7 +262,8 @@ class PromptGenerationService @Inject constructor() {
                 "- For unclear text: 'Cannot read [section]'\n" +
                 "- For missing info: 'No [item] visible'\n" +
                 "- End with: 'Total: [amount]' or 'Total not visible'\n\n" +
-                "Be organized and speak clearly. Group related information together."
+                "Be organized and speak clearly. Group related information together." +
+                "use natural language and natural sentence structure with proper punctuation including periods, commas, semicolons, and appropriate endings\""
     }
 
     /**
@@ -287,7 +288,8 @@ class PromptGenerationService @Inject constructor() {
                 "- For unclear sections: 'Text unclear in this section'\n" +
                 "- For empty areas: 'No text in this area'\n\n" +
                 "ORGANIZE: Group related information logically. Separate different sections clearly when speaking. " +
-                "If text is handwritten or stylized, mention this to the user."
+                "use natural language and natural sentence structure with proper punctuation including periods, commas, semicolons, and appropriate endings\""
+
     }
 
     /**

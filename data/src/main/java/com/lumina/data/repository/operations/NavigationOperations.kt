@@ -1,19 +1,20 @@
 package com.lumina.data.repository.operations
 
 import android.util.Log
-import com.lumina.data.datasource.ObjectDetectorDataSource
 import com.lumina.data.repository.AiOperationHelper
 import com.lumina.data.repository.AlertCoordinator
 import com.lumina.data.repository.FrameBufferManager
 import com.lumina.data.repository.NavigationModeManager
-import com.lumina.data.repository.ThreatAssessmentManager
+import com.lumina.data.repository.TransientOperationCoordinator
 import com.lumina.domain.model.NavigationCue
 import com.lumina.domain.service.NavigationModeService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -23,100 +24,79 @@ private const val TAG = "NavigationOperations"
 
 @Singleton
 class NavigationOperations @Inject constructor(
-    private val objectDetectorDataSource: ObjectDetectorDataSource,
+    private val transientOperationCoordinator: TransientOperationCoordinator,
     private val frameBufferManager: FrameBufferManager,
     private val navigationModeManager: NavigationModeManager,
-    private val threatAssessmentManager: ThreatAssessmentManager,
     private val alertCoordinator: AlertCoordinator,
     private val aiOperationHelper: AiOperationHelper
 ) {
     private val repositoryScope = CoroutineScope(Dispatchers.Default)
+    private var ambientUpdateJob: Job? = null
 
-    fun execute(): Flow<NavigationCue> = channelFlow {
-        Log.d(TAG, "Executing Navigation Operation")
+    fun execute(): Flow<NavigationCue> = callbackFlow {
+        try {
+            transientOperationCoordinator.executeTransientOperation("navigation") {
+                if (!isActive) return@executeTransientOperation
 
-        val navigationJob = repositoryScope.launch {
-            // Ensure object detector is not paused when navigation starts
-            objectDetectorDataSource.setPaused(false)
+                Log.d(TAG, "Starting simplified navigation with 20-second ambient updates")
 
-            objectDetectorDataSource.getDetectionStream(frameBufferManager.getFrameFlow())
-                .collectLatest { detectedObjects ->
-                    if (!isActive) return@collectLatest
+                // Start the 20-second ambient update timer
+                ambientUpdateJob = repositoryScope.launch {
+                    while (isActive) {
+                        delay(20_000) // 20 seconds
 
-                    Log.i(TAG, "Detected objects: $detectedObjects")
-                    val currentTime = System.currentTimeMillis()
+                        if (!isActive) break
 
-                    val assessment = threatAssessmentManager.assessThreatLevel(
-                        detectedObjects,
-                        currentTime
-                    )
+                        Log.d(TAG, "Triggering 20-second ambient update")
 
-                    val motionFrames = frameBufferManager.getMotionAnalysisFrames()
-
-                    aiOperationHelper.withAiOperation {
-                        when (assessment) {
-                            is ThreatAssessmentManager.AssessmentResult.CriticalAlert -> {
-                                if (motionFrames.isNotEmpty()) {
-                                    alertCoordinator.coordinateCriticalAlert(
-                                        assessment.detectedObjects,
-                                        motionFrames,
-                                        aiOperationHelper::generateResponse
-                                    )
-                                }
-                            }
-
-                            is ThreatAssessmentManager.AssessmentResult.InformationalAlert -> {
-                                if (motionFrames.isNotEmpty()) {
-                                    alertCoordinator.coordinateInformationalAlert(
-                                        assessment.newObjects,
-                                        motionFrames,
-                                        aiOperationHelper::generateResponse
-                                    )
-                                }
-                            }
-
-                            is ThreatAssessmentManager.AssessmentResult.AmbientUpdate -> {
-                                if (motionFrames.isNotEmpty()) {
+                        val frames = frameBufferManager.getMotionAnalysisFrames()
+                        if (frames.isNotEmpty()) {
+                            try {
+                                aiOperationHelper.withAiOperation {
                                     alertCoordinator.coordinateAmbientUpdate(
-                                        motionFrames,
+                                        frames,
                                         aiOperationHelper::generateResponse
                                     )
                                 }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error during ambient update", e)
+                                // Continue the loop - don't break on individual update failures
                             }
-
-                            ThreatAssessmentManager.AssessmentResult.NoAlert -> {
-                                // Provide continuous navigation guidance when no threats detected
-                                if (motionFrames.isNotEmpty()) {
-                                    alertCoordinator.coordinateNavigationGuidance(
-                                        "navigation_${System.currentTimeMillis()}",
-                                        motionFrames,
-                                        aiOperationHelper::generateResponse
-                                    )
-                                }
-                            }
+                        } else {
+                            Log.d(TAG, "No frames available for ambient update")
                         }
                     }
                 }
+
+                // Start navigation mode management
+                navigationModeManager.startMode(
+                    NavigationModeService.OperatingMode.NAVIGATION,
+                    ambientUpdateJob!!
+                )
+
+                // Collect and forward navigation cues from AlertCoordinator
+                val cueCollectorJob = launch {
+                    alertCoordinator.getNavigationCueFlow().collect { cue ->
+                        send(cue)
+                    }
+                }
+
+                // Wait for operation completion
+                ambientUpdateJob?.join()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Navigation operation failed", e)
+            trySend(
+                NavigationCue.InformationalAlert(
+                    "Navigation temporarily unavailable. Please try again.",
+                    true
+                )
+            )
         }
 
-        navigationModeManager.startMode(
-            NavigationModeService.OperatingMode.NAVIGATION,
-            navigationJob
-        )
-
-        val cueCollectorJob = launch {
-            alertCoordinator.getNavigationCueFlow().collect { cue ->
-                send(cue)
-            }
-        }
-
-        invokeOnClose { exception ->
-            if (exception != null) {
-                Log.e(TAG, "Navigation flow closed with error", exception)
-            } else {
-                Log.d(TAG, "Navigation flow completed/cancelled. Stopping navigation.")
-            }
-            cueCollectorJob.cancel()
+        awaitClose {
+            Log.d(TAG, "Navigation operation closing")
+            ambientUpdateJob?.cancel()
             navigationModeManager.stopAllModes()
         }
     }

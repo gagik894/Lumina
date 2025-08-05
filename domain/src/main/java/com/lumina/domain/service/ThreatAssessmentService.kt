@@ -42,6 +42,9 @@ class ThreatAssessmentService @Inject constructor() {
     /** Minimum time between informational alerts to maintain alert quality */
     private var lastInformationalAlertTime = 0L
 
+    /** Minimum time between ambient updates to avoid flooding the user with updates */
+    private var lastAmbientUpdateTime = 0L
+
     /** Previously detected objects for change detection */
     private var lastSeenObjects = emptySet<String>()
 
@@ -51,6 +54,9 @@ class ThreatAssessmentService @Inject constructor() {
 
         /** Cooldown period for informational alerts in milliseconds */
         private const val INFORMATIONAL_ALERT_COOLDOWN_MS = 5000L // 5 seconds
+
+        /** Cooldown period for ambient updates in milliseconds */
+        private const val AMBIENT_UPDATE_COOLDOWN_MS = 20000L // 20 seconds
     }
 
     /**
@@ -107,8 +113,11 @@ class ThreatAssessmentService @Inject constructor() {
         // Update object tracking even if no alert is triggered
         lastSeenObjects = currentObjectLabels
 
-        // For now, we don't trigger ambient updates automatically
-        // This could be extended with time-based or distance-based triggers
+        if (shouldTriggerAmbientUpdate(currentTime)) {
+            lastAmbientUpdateTime = currentTime
+            return AssessmentResult.AmbientUpdate
+        }
+
         return AssessmentResult.NoAlert
     }
 
@@ -130,6 +139,11 @@ class ThreatAssessmentService @Inject constructor() {
      */
     private fun shouldTriggerInformationalAlert(currentTime: Long): Boolean {
         return (currentTime - lastInformationalAlertTime) > INFORMATIONAL_ALERT_COOLDOWN_MS
+    }
+
+
+    private fun shouldTriggerAmbientUpdate(currentTime: Long): Boolean {
+        return (currentTime - lastAmbientUpdateTime) > AMBIENT_UPDATE_COOLDOWN_MS
     }
 
     /**
