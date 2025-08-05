@@ -2,6 +2,8 @@ package com.lumina.data.service
 
 import android.content.Context
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
@@ -34,14 +36,8 @@ class TextToSpeechServiceImpl @Inject constructor(
 
     // Smart buffering for handling fast AI text generation
     private val textBuffer = StringBuilder()
-    private var lastBufferUpdateTime = 0L
-    private val bufferDelayMs = 500L // Wait 500ms before speaking buffered text
-    private var bufferHandler: android.os.Handler? = null
+    private var bufferHandler: Handler? = Handler(Looper.getMainLooper())
     private var pendingBufferRunnable: Runnable? = null
-
-    init {
-        bufferHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    }
 
     override fun initialize(
         onInitialized: () -> Unit,
@@ -52,24 +48,15 @@ class TextToSpeechServiceImpl @Inject constructor(
                 TextToSpeech.SUCCESS -> {
                     textToSpeech?.let { tts ->
                         val result = tts.setLanguage(Locale.US)
-                        if (result == TextToSpeech.LANG_MISSING_DATA ||
-                            result == TextToSpeech.LANG_NOT_SUPPORTED
-                        ) {
-                            // Fallback to English if default language is not supported
+                        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                             val englishResult = tts.setLanguage(Locale.US)
-                            if (englishResult == TextToSpeech.LANG_MISSING_DATA ||
-                                englishResult == TextToSpeech.LANG_NOT_SUPPORTED
-                            ) {
+                            if (englishResult == TextToSpeech.LANG_MISSING_DATA || englishResult == TextToSpeech.LANG_NOT_SUPPORTED) {
                                 onError("Language not supported")
                                 return@let
                             }
                         }
-
-                        // Configure TTS for accessibility
-                        tts.setSpeechRate(1.0f) // Normal speech rate
-                        tts.setPitch(1.0f) // Normal pitch
-
-                        // Set up utterance listener for monitoring speech progress
+                        tts.setSpeechRate(1.0f)
+                        tts.setPitch(1.0f)
                         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                             override fun onStart(utteranceId: String?) {
                                 Log.d(TAG, "Speech started: $utteranceId")
@@ -83,15 +70,12 @@ class TextToSpeechServiceImpl @Inject constructor(
                                 Log.e(TAG, "Speech error: $utteranceId")
                             }
                         })
-
                         isInitialized = true
                         onInitialized()
                     }
                 }
 
-                else -> {
-                    onError("Failed to initialize TextToSpeech")
-                }
+                else -> onError("Failed to initialize TextToSpeech")
             }
         }
     }
@@ -114,160 +98,83 @@ class TextToSpeechServiceImpl @Inject constructor(
             is NavigationCue.AmbientUpdate -> navigationCue.isDone
         }
 
-        // For crossing mode and other continuous operations, use smart buffering for all alert types
-        // This ensures TTS speaks chunks as they come in, providing real-time feedback
         addToBuffer(message, navigationCue, isDone)
     }
 
-    /**
-     * Speaks critical alerts with clear announcement and proper pacing.
-     */
-    private fun speakCriticalAlert(message: String) {
-        // Stop any current speech first
-        textToSpeech?.stop()
-
-        // Clear announcement to get attention
-        speakWithParameters("ALERT", TextToSpeech.QUEUE_FLUSH, 1.0f, 0.8f)
-
-        // Brief pause, then speak the complete message clearly
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            // Preprocess the message for better TTS pronunciation
-            val processedMessage = ttsPreprocessingService.preprocessForTts(message)
-            speakWithParameters(processedMessage, TextToSpeech.QUEUE_ADD, 1.0f, 0.9f)
-        }, 1000) // Slightly longer pause for clarity
-    }
-
-    /**
-     * Adds text to buffer and schedules speaking based on completion or natural breaks.
-     */
     private fun addToBuffer(text: String, navigationCue: NavigationCue, isDone: Boolean) {
         synchronized(textBuffer) {
-            // Only add non-empty text
-            if (text.isNotBlank()) {
-                textBuffer.append(text)
-            }
+            textBuffer.append(text)
+            Log.d(TAG, "Added to buffer: '$text', buffer now: '${textBuffer}'")
 
-            lastBufferUpdateTime = System.currentTimeMillis()
-
-            // Cancel previous pending speech
             pendingBufferRunnable?.let { bufferHandler?.removeCallbacks(it) }
+            val bufferContent = textBuffer.toString()
 
-            // Speak immediately if:
-            // 1. Generation is complete (isDone)
-            // 2. We have a clear sentence ending (. ! ?)
-            // 3. Buffer is getting too long
-            val hasNaturalBreak = textBuffer.toString().let { buffer ->
-                // Only break on clear sentence endings
-                buffer.endsWith(".") || buffer.endsWith("!") || buffer.endsWith("?") ||
-                        buffer.contains(". ") || buffer.contains("! ") || buffer.contains("? ")
-            }
+            val hasNaturalBreak = bufferContent.contains(". ") ||
+                    bufferContent.contains(".\n") ||
+                    bufferContent.contains("?") ||
+                    bufferContent.contains("!") ||
+                    bufferContent.contains("\n") ||
+                    bufferContent.contains("...") ||
+                    bufferContent.contains("  ") ||
+                    bufferContent.contains("|")
 
             val isCritical = navigationCue is NavigationCue.CriticalAlert
-            val criticalBufferThreshold =
-                if (isCritical) 50 else 150  // Speak sooner for critical alerts
-            val criticalDelayMs =
-                if (isCritical) 200L else bufferDelayMs  // Faster response for critical alerts
+            val bufferThreshold = if (isCritical) 80 else 300
 
-            val shouldSpeakNow = isDone ||
-                    hasNaturalBreak ||
-                    textBuffer.length > criticalBufferThreshold
+            Log.d(
+                TAG,
+                "Natural break detected: $hasNaturalBreak, isDone: $isDone, buffer length: ${bufferContent.length}, threshold: $bufferThreshold"
+            )
 
-            if (shouldSpeakNow) {
+            if (hasNaturalBreak || isDone || bufferContent.length > bufferThreshold) {
                 speakBufferedText(navigationCue)
-            } else {
-                // Schedule speaking after delay - shorter for critical alerts
-                pendingBufferRunnable = Runnable {
-                    if (System.currentTimeMillis() - lastBufferUpdateTime >= criticalDelayMs) {
-                        speakBufferedText(navigationCue)
-                    }
-                }
-                bufferHandler?.postDelayed(pendingBufferRunnable!!, criticalDelayMs)
             }
         }
     }
 
-    /**
-     * Speaks the buffered text and clears the buffer.
-     */
     private fun speakBufferedText(navigationCue: NavigationCue) {
         synchronized(textBuffer) {
             if (textBuffer.isNotEmpty()) {
-                val textToSpeak = textBuffer.toString().trim()
+                val textToSpeak = textBuffer.toString()
                 textBuffer.clear()
-
                 if (textToSpeak.isNotBlank()) {
-                    // Preprocess the text for better TTS pronunciation
-                    val processedText = ttsPreprocessingService.preprocessForTts(textToSpeak)
-
-                    // For critical alerts, interrupt current speech for immediate attention
-                    val queueMode = if (navigationCue is NavigationCue.CriticalAlert) {
-                        TextToSpeech.QUEUE_FLUSH  // Replace any current speech
-                    } else {
-                        TextToSpeech.QUEUE_ADD    // Queue normally
-                    }
-
-                    speakImmediately(processedText, queueMode, navigationCue)
+                    Log.d(TAG, "Speaking buffered text: '$textToSpeak'")
+                    val queueMode =
+                        if (navigationCue is NavigationCue.CriticalAlert) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                    speakWithParameters(textToSpeak, queueMode, 1.0f, 1.0f)
                 }
             }
         }
     }
 
-    /**
-     * Speaks text immediately without buffering.
-     */
-    private fun speakImmediately(text: String, queueMode: Int, navigationCue: NavigationCue) {
-        val (pitch, rate) = when (navigationCue) {
-            is NavigationCue.CriticalAlert -> Pair(1.0f, 0.9f) // Normal pitch, slightly slower
-            is NavigationCue.InformationalAlert -> Pair(1.0f, 1.0f)
-            is NavigationCue.AmbientUpdate -> Pair(0.9f, 0.9f)
-        }
-
-        speakWithParameters(text, queueMode, pitch, rate)
-    }
 
     override fun speak(text: String) {
         if (!isInitialized) {
             Log.w(TAG, "TTS not initialized, cannot speak text")
             return
         }
-
-        // Preprocess the text for better TTS pronunciation
-        val processedText = ttsPreprocessingService.preprocessForTts(text)
-        speakWithParameters(processedText, TextToSpeech.QUEUE_ADD, 1.0f, 1.0f)
+        speakWithParameters(text, TextToSpeech.QUEUE_ADD, 1.0f, 1.0f)
     }
 
-    private fun speakWithParameters(
-        text: String,
-        queueMode: Int,
-        pitch: Float,
-        rate: Float
-    ) {
+    private fun speakWithParameters(text: String, queueMode: Int, pitch: Float, rate: Float) {
         textToSpeech?.let { tts ->
-            // Set speech characteristics
+            val processedText = ttsPreprocessingService.preprocessForTts(text)
             tts.setPitch(pitch)
             tts.setSpeechRate(rate)
-
-            // Create unique utterance ID for tracking
             val currentUtteranceId = "utterance_${++utteranceId}"
-
-            // Create speech parameters
             val params = Bundle().apply {
                 putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, currentUtteranceId)
             }
-
-            // Speak the text
-            val result = tts.speak(text, queueMode, params, currentUtteranceId)
-
+            val result = tts.speak(processedText, queueMode, params, currentUtteranceId)
             if (result == TextToSpeech.ERROR) {
-                Log.e(TAG, "Failed to speak text: $text")
+                Log.e(TAG, "Failed to speak text: $processedText")
             } else {
-                Log.d(TAG, "Speaking: $text (ID: $currentUtteranceId)")
+                Log.d(TAG, "Speaking: $processedText (ID: $currentUtteranceId)")
             }
         }
     }
 
     override fun stop() {
-        // Clear buffer and stop speech
         synchronized(textBuffer) {
             textBuffer.clear()
             pendingBufferRunnable?.let { bufferHandler?.removeCallbacks(it) }
@@ -296,13 +203,3 @@ class TextToSpeechServiceImpl @Inject constructor(
         isInitialized = false
     }
 }
-
-/**
- * Helper data class for tuple with 4 elements.
- */
-private data class Tuple4<A, B, C, D>(
-    val first: A,
-    val second: B,
-    val third: C,
-    val fourth: D
-)

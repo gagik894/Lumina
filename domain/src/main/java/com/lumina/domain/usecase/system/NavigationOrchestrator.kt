@@ -77,9 +77,7 @@ class NavigationOrchestrator @Inject constructor(
             when (navigationCue) {
                 is NavigationCue.CriticalAlert -> {
                     val text = if (navigationCue.isDone) {
-                        if (navigationCue.message.isNotBlank()) {
-                            accumulator + navigationCue.message
-                        } else ""
+                        accumulator + navigationCue.message
                     } else {
                         accumulator + navigationCue.message
                     }
@@ -88,9 +86,7 @@ class NavigationOrchestrator @Inject constructor(
 
                 is NavigationCue.InformationalAlert -> {
                     val text = if (navigationCue.isDone) {
-                        if (navigationCue.message.isNotBlank()) {
-                            accumulator + navigationCue.message
-                        } else ""
+                        accumulator + navigationCue.message
                     } else {
                         accumulator + navigationCue.message
                     }
@@ -99,9 +95,7 @@ class NavigationOrchestrator @Inject constructor(
 
                 is NavigationCue.AmbientUpdate -> {
                     val text = if (navigationCue.isDone) {
-                        if (navigationCue.message.isNotBlank()) {
-                            accumulator + navigationCue.message
-                        } else ""
+                        accumulator + navigationCue.message
                     } else {
                         accumulator + navigationCue.message
                     }
