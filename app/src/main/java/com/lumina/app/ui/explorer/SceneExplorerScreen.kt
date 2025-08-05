@@ -18,29 +18,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lumina.app.ui.camera.CameraScreen
 import com.lumina.app.ui.common.HandleCameraPermission
 import com.lumina.domain.model.InitializationState
-import com.lumina.domain.model.NavigationCueType
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -54,13 +47,12 @@ private const val TAG = "SceneExplorerScreen"
  * Main screen for the Scene Explorer feature that provides intelligent navigation cues
  * for visually impaired users.
  *
- * This composable manages the camera feed and displays AI-generated navigation cues with
- * different urgency levels and styling. It also provides text-to-speech functionality
- * with manual controls for accessibility:
- * - Critical alerts: Red background, bold text, immediate speech for threats
- * - Informational alerts: Blue background, normal speech for new objects
- * - Ambient updates: Gray background, calm speech for general context
- * - Manual controls: Repeat and stop speech buttons
+ * This composable manages the camera feed and provides text-to-speech functionality
+ * with voice controls for accessibility. The UI is simplified with:
+ * - Black background for minimal visual distraction
+ * - No visual navigation cue display (audio-only)
+ * - No debug controls or camera preview toggle
+ * - Voice commands: Long-press to talk, double-tap to explore scene
  * - Loading: Shows progress indicators for both AI model and TTS initialization
  *
  * @param viewModel The ViewModel managing the scene exploration logic and state
@@ -72,12 +64,12 @@ fun SceneExplorerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    val previewToggle = remember { mutableStateOf(false) }
     HandleCameraPermission(
         onPermissionGranted = {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(Color.Black) // Always black background
                     .combinedClickable(
                         onLongClick = { startVoiceCommand(context, viewModel) },
                         onDoubleClick = { viewModel.investigateScene() },
@@ -117,34 +109,10 @@ fun SceneExplorerScreen(
                         
                         CameraScreen(
                             onFrame = viewModel::onFrameReceived,
-                            showPreview = previewToggle.value,
+                            showPreview = false, // Always hidden for simplified UI
                             config = cameraConfig,
                             isActive = isCameraActive
                         )
-
-//                        if (BuildConfig.DEBUG) {
-                        FloatingActionButton(
-                            onClick = { previewToggle.value = !previewToggle.value },
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(16.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (previewToggle.value) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "Toggle preview"
-                            )
-                        }
-//                        }
-
-                        if (uiState.description.isNotEmpty()) {
-                            NavigationCueDisplay(
-                                text = uiState.description,
-                                alertType = uiState.alertType,
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(16.dp)
-                            )
-                        }
 
                         // Long-press anywhere to start voice-based Find mode.
                     }
@@ -284,55 +252,4 @@ private fun InitializationScreen(isTtsInitialized: Boolean) {
             )
         }
     }
-}
-
-/**
- * Displays navigation cues with appropriate styling based on alert type.
- *
- * @param text The navigation cue text to display
- * @param alertType The type of alert for styling purposes
- * @param modifier Modifier for the composable
- */
-@Composable
-private fun NavigationCueDisplay(
-    text: String,
-    alertType: NavigationCueType,
-    modifier: Modifier = Modifier
-) {
-    val (backgroundColor, textColor, fontWeight) = when (alertType) {
-        NavigationCueType.CRITICAL -> Triple(
-            Color.Red.copy(alpha = 0.9f),
-            Color.White,
-            FontWeight.Bold
-        )
-
-        NavigationCueType.INFORMATIONAL -> Triple(
-            Color.Blue.copy(alpha = 0.8f),
-            Color.White,
-            FontWeight.Medium
-        )
-
-        NavigationCueType.AMBIENT -> Triple(
-            Color.Gray.copy(alpha = 0.7f),
-            Color.White,
-            FontWeight.Normal
-        )
-
-        NavigationCueType.NONE -> Triple(
-            Color.Black.copy(alpha = 0.6f),
-            Color.White,
-            FontWeight.Normal
-        )
-    }
-
-    Text(
-        text = text,
-        style = MaterialTheme.typography.headlineMedium.copy(
-            fontWeight = fontWeight,
-            color = textColor
-        ),
-        modifier = modifier
-            .background(backgroundColor, MaterialTheme.shapes.medium)
-            .padding(12.dp)
-    )
 }
