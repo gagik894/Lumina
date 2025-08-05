@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.lumina.domain.model.ImageInput
 import com.lumina.domain.model.InitializationState
 import com.lumina.domain.model.NavigationCue
+import com.lumina.domain.model.NavigationCue.InformationalAlert
 import com.lumina.domain.model.NavigationCueType
 import com.lumina.domain.model.VoiceCommand
 import com.lumina.domain.service.CameraStateService
@@ -92,6 +93,10 @@ class SceneExplorerViewModel @Inject constructor(
     // TTS state tracking - separate from service to handle initialization lifecycle
     private val _ttsState = MutableStateFlow(false)
 
+    // Track whether we've shown the one-time messages to prevent repetition
+    private var hasShownWelcomeMessage = false
+    private var hasShownInitializingMessage = false
+
     // Cached frame for immediate reuse in on-demand operations (investigate, voice commands)
     // Avoids waiting for next camera callback when user requests immediate analysis
     private var lastFrameBytes: ByteArray? = null
@@ -115,8 +120,9 @@ class SceneExplorerViewModel @Inject constructor(
      * Initializes TTS state tracking for UI purposes.
      */
     private fun initializeTtsStateOnly() {
+        // TTS is now ready; no UI action needed yet
         _ttsState.value = true
-        Log.d(TAG, "TTS state initialized for UI")
+        Log.d(TAG, "TTS initialized for UI")
     }
 
     /**
@@ -131,6 +137,30 @@ class SceneExplorerViewModel @Inject constructor(
             ),
             _ttsState
         ) { initState, (description, alertType), ttsInitialized ->
+            if (ttsInitialized && !hasShownInitializingMessage) {
+                hasShownInitializingMessage = true
+                val message = "Initializing, please wait..."
+                navigationOrchestrator.emitNavigationCue(
+                    InformationalAlert(
+                        message = message,
+                        isDone = true
+                    )
+                )
+            }
+            if (initState is InitializationState.Initialized && !hasShownWelcomeMessage) {
+                Log.d(TAG, "Initialization complete")
+                hasShownWelcomeMessage = true
+                val welcomeMessage = "Lumina is ready! " +
+                        "Long press to talk, double tap to explore. " +
+                        "Say 'help' for more commands."
+                navigationOrchestrator.emitNavigationCue(
+                    InformationalAlert(
+                        message = welcomeMessage,
+                        isDone = true
+                    )
+                )
+            }
+           
             SceneExplorerUiState(
                 initializationState = initState,
                 description = description,
@@ -174,6 +204,7 @@ class SceneExplorerViewModel @Inject constructor(
                 manageFrameThrottling.endFrameProcessing()
             }
         }
+
     }
 
     /**
