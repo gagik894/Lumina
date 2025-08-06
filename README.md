@@ -18,7 +18,6 @@ Lumina provides a comprehensive suite of tools to help users navigate their worl
 * **Advanced Text Reading:** A powerful OCR for reading documents and signs.
 * **Specialized Readers:** Includes dedicated modes for parsing **Receipts** and identifying *
   *Currency**.
-
 ---
 
 ### Core Technical Innovation
@@ -39,15 +38,20 @@ To get a feel for Lumina's primary capabilities, we recommend trying these core 
 
 NOTE: TO start voice input press and hold the screen
 
-**1. Describe a Scene:**
+**1. Find a Business:**
+
+* **Action:** Slowly rotate/move your phone.
+* **Voice Command:** Say "Find a pharmacy."
+
+**1.1. Find an object:**
+
+* **Action:** Slowly rotate/move your phone.
+* **Voice Command:** Say "Find TV remote."
+
+**2. Describe a Scene:**
 
 * **Action:** Point the phone at any scene (e.g., your desk).
 * **Command:** Double tap anywhere on the screen.
-
-**2. Find a Business:**
-
-* **Action:** If possible, stand on a street with visible storefronts.
-* **Voice Command:** Say "Find a pharmacy."
 
 **3. Read Text:**
 
