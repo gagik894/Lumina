@@ -1,102 +1,80 @@
-# Lumina - AI Assistant for the Visually Impaired
+# Lumina: On-Device AI Assistant for the Visually Impaired
 
-Lumina is an Android application designed to assist visually impaired users by providing real-time
-information about their surroundings through a combination of AI-powered computer vision and voice
-commands.
+### **About the Developer**
 
-## Features
+My name is Gagik, and I am a 19-year-old student at Paris-Saclay University. I developed Lumina as a
+solo project to explore my passion for using on-device AI to solve real-world accessibility
+challenges.
 
-The application is structured around a set of core features, each represented by a specific use case
-in the domain layer.
+---
 
-### Core Functionality
+Lumina is an Android application engineered to serve as a real-time AI assistant for visually
+impaired users. By leveraging the power of Gemma 3n, Lumina transforms a smartphone into an
+intelligent companion that provides environmental understanding without ever compromising user
+privacy. All processing occurs 100% on-device.
 
-* **Navigation Mode**: Provides continuous audio feedback about the environment to help users
-  navigate safely. This includes ambient updates about the surroundings.
-    * `StartNavigationUseCase`: Initiates the navigation mode.
-    * `StopNavigationUseCase`: Terminates the navigation mode.
+### Core Features
 
-* **Scene Description**: Offers a detailed description of the current scene from the camera's point
-  of view.
-    * `DescribeSceneUseCase`: Generates a textual description of the scene.
+* **Scene Analysis:** Get a rich, detailed audio description of any new environment.
+* **Real-World Finder:** Locate specific businesses or landmarks (e.g., "Find a pharmacy").
+* **Object Finder:** Find common household objects in your personal space.
+* **General Q&A:** Ask any question about what the camera sees (e.g., "What color is this?").
+* **Advanced Text Reading:** A powerful OCR for reading documents and signs.
+* **Specialized Readers:** Includes dedicated modes for parsing **Receipts** and identifying *
+  *Currency**.
 
-* **Object Finding**: Helps users locate specific objects in their environment.
-    * `FindObjectUseCase`: Searches for a user-specified object.
+### Core Technical Innovation
 
-* **Question Answering**: Allows users to ask questions about what the camera sees.
-    * `AskQuestionUseCase`: Processes user questions about the scene.
+A key challenge of mobile AI is handling imperfect camera data. Our primary innovation is an *
+*Intelligent Frame Selection** pipeline that analyzes the video stream in real-time, discards blurry
+frames, and selects only the sharpest image to send to Gemma 3n. This dramatically increases the
+accuracy and reliability of all vision-based features.
 
-* **Text and Document Reading**:
-    * `ReadTextUseCase`: Reads any visible text from the camera feed, including from multiple frames
-      for better accuracy.
-    * `ReadReceiptUseCase`: Specifically tailored to read and interpret receipts.
-    * `IdentifyCurrencyUseCase`: Identifies currency bills and coins.
+---
 
-* **Crossing Mode**: A specialized mode to assist with safely crossing streets.
-    * `StartCrossingModeUseCase`: Activates the street crossing assistance feature.
+### Getting Started: A Quick Tour of Lumina
 
-### Voice Commands
+**NOTE:** To activate voice input, **press and hold** anywhere on the screen.
 
-The application is primarily controlled through voice. The `ProcessVoiceCommandUseCase` interprets
-natural language commands to activate the various features. Supported commands include:
+**1. Scene Understanding**
 
-* **Finding Objects**: "Find [object]", "Locate the book"
-* **Navigation**: "Start navigation", "Stop navigation"
-* **Scene Interaction**: "Describe the scene", "Question: what is in front of me?"
-* **Text Reading**: "Read text", "Identify currency", "Read the receipt"
-* **Control**: "Stop", "Cancel"
-* **Help**: "Help"
+* **Describe a Scene:** Double-tap the screen to get a detailed description of your surroundings.
+* **Find a Business:** Say "Find a pharmacy" while moving the phone to locate it.
+* **Find an Object:** Say "Find TV remote" to locate an object indoors.
 
-### Camera and Frame Management
+**2. Reading & Recognition**
 
-The application intelligently manages the camera and the frames it captures to optimize for
-different tasks.
+* **Read General Text:** Say "Read text" while pointing at a document.
+* **Identify Currency:** Say "Identify currency" or "Read money" while pointing at a bill.
+* **Read a Receipt:** Say "Read receipt."
 
-* `ManageCameraOperationsUseCase`: Handles activating and deactivating the camera, and switching
-  between modes like `NAVIGATION` and `TEXT_READING`.
-* `ProcessFrameUseCase`: Processes individual frames from the camera.
-* `ManageFrameThrottlingUseCase`: Manages the rate at which frames are processed to balance
-  performance and battery usage.
+**3. Interactive Modes**
 
-### System and State Management
+* **Ask a Question:** Say "What is this?" or "What color is the book?"
+* **Navigational Assistance:** Say "Start navigation" for continuous environmental updates.
 
-* `GetInitializationStateUseCase`: Checks if the system components, like the AI model and
-  Text-to-Speech engine, are ready.
-* `NavigationOrchestrator`: Manages the flow of navigation cues and coordinates the various
-  subsystems.
-* `StopAllOperationsUseCase`: Provides a global way to stop all ongoing operations.
-* `HandleTtsUseCase`: Manages Text-to-Speech functionality.
+---
 
-## Architecture
+### Project Status & Roadmap
 
-The application follows a clean architecture pattern, separating concerns into `data`, `domain`, and
-`app` (presentation) layers. The `domain` layer contains the core business logic and use cases,
-making the application modular and testable.
+Lumina is currently a functional prototype. The features listed in the "Quick Tour" are the most
+representative of the final vision.
 
-### Privacy-First and Offline-Ready
+**Future Work:**
 
-A core principle of Lumina is user privacy. All AI processing is done **100% on-device** thanks to
-the efficiency of the Gemma 3n model. This means:
+* **Proactive Safety Features:** Our immediate goal is to build out the **"Crossing Mode"**, a
+  feature designed to analyze traffic flow. The conceptual framework is in place but it is not yet
+  optimized for real-world use.
+* **Enhanced Recognition:** Fine-tuning the model on specialized datasets to improve the accuracy of
+  the Currency and Receipt readers.
+* **Personalization:** Adding the ability for users to "teach" Lumina about their personal objects.
 
-- No user data (images, audio, or voice commands) ever leaves the device.
-- The application is fully functional without an internet connection, making it reliable in any
-  situation.
+---
 
-## How to Build
+### How to Build and Run
 
-This is a standard Android Gradle project. You can build it using Android Studio or from the command
-line:
+This is a standard Android Gradle project.
 
-```bash
-./gradlew build
-```
-
-## How to Run
-
-To run the application, you can use Android Studio to deploy it to an Android device or emulator.
-Alternatively, you can install the generated APK using `adb`:
-
-```bash
-./gradlew installDebug
-adb shell am start -n com.lumina.app/.MainActivity
-```
+1. **Build:** `./gradlew build`
+2. **Install and Run:**
+   `./gradlew installDebug && adb shell am start -n com.lumina.app/.MainActivity`
