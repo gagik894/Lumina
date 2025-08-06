@@ -1,15 +1,19 @@
 # Lumina: On-Device AI Assistant for the Visually Impaired
 
+### **About the Developer**
+
+My name is Gagik, and I am a 19-year-old student at Paris-Saclay University. I developed Lumina as a
+solo project to explore my passion for using on-device AI to solve real-world accessibility
+challenges.
+
+---
+
 Lumina is an Android application engineered to serve as a real-time AI assistant for visually
 impaired users. By leveraging the power of Gemma 3n, Lumina transforms a smartphone into an
 intelligent companion that provides environmental understanding without ever compromising user
 privacy. All processing occurs 100% on-device.
 
----
-
 ### Core Features
-
-Lumina provides a comprehensive suite of tools to help users navigate their world with confidence.
 
 * **Scene Analysis:** Get a rich, detailed audio description of any new environment.
 * **Real-World Finder:** Locate specific businesses or landmarks (e.g., "Find a pharmacy").
@@ -18,7 +22,6 @@ Lumina provides a comprehensive suite of tools to help users navigate their worl
 * **Advanced Text Reading:** A powerful OCR for reading documents and signs.
 * **Specialized Readers:** Includes dedicated modes for parsing **Receipts** and identifying *
   *Currency**.
----
 
 ### Core Technical Innovation
 
@@ -27,74 +30,44 @@ A key challenge of mobile AI is handling imperfect camera data. Our primary inno
 frames, and selects only the sharpest image to send to Gemma 3n. This dramatically increases the
 accuracy and reliability of all vision-based features.
 
-**For a complete breakdown of our architecture and other technical solutions, please see our
-detailed `TECHNICAL_WRITEUP.md`.**
-
 ---
 
-### Getting Started: A Quick Tour
+### Getting Started: A Quick Tour of Lumina
 
-To get a feel for Lumina's primary capabilities, we recommend trying these core features first:
+**NOTE:** To activate voice input, **press and hold** anywhere on the screen.
 
-NOTE: TO start voice input press and hold the screen
+**1. Scene Understanding**
 
-**1. Find a Business:**
+* **Describe a Scene:** Double-tap the screen to get a detailed description of your surroundings.
+* **Find a Business:** Say "Find a pharmacy" while moving the phone to locate it.
+* **Find an Object:** Say "Find TV remote" to locate an object indoors.
 
-* **Action:** Slowly rotate/move your phone.
-* **Voice Command:** Say "Find a pharmacy."
+**2. Reading & Recognition**
 
-**1.1. Find an object:**
+* **Read General Text:** Say "Read text" while pointing at a document.
+* **Identify Currency:** Say "Identify currency" or "Read money" while pointing at a bill.
+* **Read a Receipt:** Say "Read receipt."
 
-* **Action:** Slowly rotate/move your phone.
-* **Voice Command:** Say "Find TV remote."
+**3. Interactive Modes**
 
-**2. Describe a Scene:**
-
-* **Action:** Point the phone at any scene (e.g., your desk).
-* **Command:** Double tap anywhere on the screen.
-
-**3. Read Text:**
-
-* **Action:** Point the phone at a well-lit document.
-* **Voice Command:** Say "Read text."
-
-**4. Idetify Currency:**
-
-* **Action:** Point the phone at a well-lit currency note.
-* **Voice Command:** Say "Identify currency/read money."
-
-**5. Read receipts:**
-
-* **Action:** Point the phone at a well-lit receipt.
-* **Voice Command:** Say "Read receipt."
-
-**6. Ask a Question:**
-
-* **Action:** Point the phone at any object.
-* **Voice Command:** Ask a question, like "What is this?"
-
-**7. Navigational Assistance:**
-
-* **Action:** Point the phone forward.
-* **Voice Command:** Say "Start Navigation"
+* **Ask a Question:** Say "What is this?" or "What color is the book?"
+* **Navigational Assistance:** Say "Start navigation" for continuous environmental updates.
 
 ---
 
 ### Project Status & Roadmap
 
-Lumina is currently a functional prototype developed for the Gemma 3n Impact Challenge. The features
-listed in the "Quick Tour" are the most stable and representative of the final vision.
+Lumina is currently a functional prototype. The features listed in the "Quick Tour" are the most
+representative of the final vision.
 
 **Future Work:**
 
 * **Proactive Safety Features:** Our immediate goal is to build out the **"Crossing Mode"**, a
-  feature designed to analyze traffic flow and assist with street crossings. The conceptual
-  framework for this is in place, leveraging our Motion Context Analysis pipeline, but it is not yet
+  feature designed to analyze traffic flow. The conceptual framework is in place but it is not yet
   optimized for real-world use.
 * **Enhanced Recognition:** Fine-tuning the model on specialized datasets to improve the accuracy of
   the Currency and Receipt readers.
-* **Personalization:** Adding the ability for users to "teach" Lumina about their personal objects (
-  e.g., "This is my wallet").
+* **Personalization:** Adding the ability for users to "teach" Lumina about their personal objects.
 
 ---
 
