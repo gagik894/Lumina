@@ -18,13 +18,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -88,6 +94,7 @@ fun SceneExplorerScreen(
                     is InitializationState.Initialized -> {
                         val cameraMode by viewModel.cameraMode.collectAsState()
                         val isCameraActive by viewModel.isCameraActive.collectAsState()
+                        var showCameraPreview by remember { mutableStateOf(true) } // Default to true for demo
 
                         // Log camera state changes for debugging
                         androidx.compose.runtime.LaunchedEffect(cameraMode, isCameraActive) {
@@ -114,10 +121,23 @@ fun SceneExplorerScreen(
                         
                         CameraScreen(
                             onFrame = viewModel::onFrameReceived,
-                            showPreview = false, // Always hidden for simplified UI
+                            showPreview = showCameraPreview,
                             config = cameraConfig,
                             isActive = isCameraActive
                         )
+
+                        // Button to toggle camera preview for demos
+                        FloatingActionButton(
+                            onClick = { showCameraPreview = !showCameraPreview },
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(16.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (showCameraPreview) Icons.Default.VideocamOff else Icons.Default.Videocam,
+                                contentDescription = if (showCameraPreview) "Hide Preview" else "Show Preview"
+                            )
+                        }
 
                         // Long-press anywhere to start voice-based Find mode.
                     }
