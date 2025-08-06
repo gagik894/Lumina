@@ -127,22 +127,55 @@ class TextToSpeechServiceImpl @Inject constructor(
             )
 
             if (hasNaturalBreak || isDone || bufferContent.length > bufferThreshold) {
-                speakBufferedText(navigationCue)
+                speakBufferedText(navigationCue, isDone)
             }
         }
     }
 
-    private fun speakBufferedText(navigationCue: NavigationCue) {
+    private fun speakBufferedText(navigationCue: NavigationCue, isDone: Boolean) {
         synchronized(textBuffer) {
-            if (textBuffer.isNotEmpty()) {
-                val textToSpeak = textBuffer.toString()
-                textBuffer.clear()
-                Log.d(TAG, "Speaking buffered text: '$textToSpeak'")
-                val queueMode =
-                    if (navigationCue is NavigationCue.CriticalAlert) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                speakWithParameters(textToSpeak, queueMode, 1.0f, 1.0f)
+            if (textBuffer.isEmpty()) return
 
+            val bufferContent = textBuffer.toString()
+            val textToSpeak: String
+
+            if (isDone) {
+                // If it's the final chunk, speak everything that's left.
+                textToSpeak = bufferContent
+                textBuffer.clear()
+            } else {
+                // Define sentence break markers. Note ". " to avoid breaking on "example.com".
+                val breakMarkers =
+                    listOf(". ", "?", "!", ".\n", "?\n", "!\n", "\n", "|", "...", "? ", "!  ")
+                var lastBreakIndex = -1
+                var breakMarkerLength = 0
+
+                // Find the last occurrence of any break marker.
+                for (marker in breakMarkers) {
+                    val index = bufferContent.lastIndexOf(marker)
+                    if (index > lastBreakIndex) {
+                        lastBreakIndex = index
+                        breakMarkerLength = marker.length
+                    }
+                }
+
+                if (lastBreakIndex != -1) {
+                    // A valid sentence break was found. Extract everything up to and including it.
+                    val endIndex = lastBreakIndex + breakMarkerLength
+                    textToSpeak = bufferContent.substring(0, endIndex)
+                    // Update the buffer to only contain the remaining, unspoken part.
+                    textBuffer.delete(0, endIndex)
+                } else {
+                    // No complete sentence found in the buffer yet, so don't speak anything.
+                    // We'll wait for the next chunk or the "isDone" signal.
+                    return
+                }
             }
+            Log.d(TAG, "Speaking buffered text: '$textToSpeak'")
+            val queueMode =
+                if (navigationCue is NavigationCue.CriticalAlert) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            speakWithParameters(textToSpeak, queueMode, 1.0f, 1.0f)
+
         }
     }
 
